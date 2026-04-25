@@ -1,0 +1,69 @@
+require("dotenv").config();
+
+const express = require("express");
+const line = require("@line/bot-sdk");
+
+const app = express();
+
+const config = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET,
+};
+
+const client = new line.Client(config);
+
+let orders = {};
+
+app.get("/", (req, res) => {
+  res.send("訂餐小幫手運作中");
+});
+
+app.post("/webhook", line.middleware(config), async (req, res) => {
+  try {
+    await Promise.all(req.body.events.map(handleEvent));
+    res.status(200).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).end();
+  }
+});
+
+async function handleEvent(event) {
+  if (event.type !== "message" || event.message.type !== "text") return null;
+
+  const text = event.message.text.trim();
+
+  if (text === "統計") {
+    const result = Object.entries(orders)
+      .map(([item, users]) => `${item} x${users.length}`)
+      .join("\n");
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: result || "目前還沒有人訂餐",
+    });
+  }
+
+  if (text === "清空") {
+    orders = {};
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "已清空今天訂單",
+    });
+  }
+
+  if (!orders[text]) orders[text] = [];
+
+  orders[text].push(event.source.userId);
+
+  return client.replyMessage(event.replyToken, {
+    type: "text",
+    text: `已登記：${text}\n目前數量：${orders[text].length}`,
+  });
+}
+
+const port = process.env.PORT || 3000;
+
+app.listen(port, () => {
+  console.log(`Bot running on port ${port}`);
+});
