@@ -137,25 +137,28 @@ function parseOrders(text) {
 
     // 純文字：可能是品項，也可能是人名 +1
 if (!/[+*]/.test(line)) {
-  // 含「顆」通常是品項，例如：海苔6顆
-  if (/顆/.test(line)) {
+    if (!/[+*]/.test(line)) {
+    // 含「顆」通常是品項，例如：海苔6顆
+    if (/顆/.test(line)) {
+      currentItem = line;
+      currentPrice = 0;
+      itemBuffer = line;
+      continue;
+    }
+
+    // 如果前面已經有品項，這行當作人名 +1
+    if (currentItem) {
+      add(currentItem, currentPrice, line, 1);
+      continue;
+    }
+
+    // 否則才暫存成品項
     currentItem = line;
     currentPrice = 0;
     itemBuffer = line;
     continue;
   }
 
-  // 如果前面已經有品項，這行當作人名 +1
-  if (currentItem) {
-    add(currentItem, currentPrice, line, 1);
-    continue;
-  }
-
-  // 否則才暫存成品項
-  currentItem = line;
-  currentPrice = 0;
-  itemBuffer = line;
-  continue;
 }
 
   return { itemCount, userTotal };
