@@ -31,11 +31,12 @@ function parseOrders(text) {
   let currentPrice = 0;
   let pendingOrder = null;
   let itemBuffer = '';
+  let priceMap = {};
 
   const itemCount = {};
   const userTotal = {};
 
-  function add(item, price, name, qty, note = '') {
+  function add(item, price, name, qty = 1, note = '') {
     item = clean(item);
     name = clean(name);
 
@@ -44,32 +45,46 @@ function parseOrders(text) {
     const finalItem = note ? `${item}（${note}）` : item;
 
     itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
-    userTotal[name] = (userTotal[name] || 0) + price * qty;
+    userTotal[name] = (userTotal[name] || 0) + price;
+  }
+
+  function getPrice(rawQty) {
+    if (priceMap[rawQty] !== undefined) return priceMap[rawQty];
+    if (rawQty === '半' && priceMap['0.5'] !== undefined) return priceMap['0.5'];
+    return currentPrice;
   }
 
   for (let line of lines) {
     if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
 
-    // 上一行是 品項+價格，這一行是名字
+    // 價格表：0.5 $55 / 1 $110
+    const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
+    if (priceTable) {
+      priceMap[priceTable[1]] = Number(priceTable[2]);
+      continue;
+    }
+
+    // 上一行是品項+價格，這行是名字
     if (pendingOrder && !/[+*]/.test(line) && !/\d/.test(line)) {
       add(pendingOrder.item, pendingOrder.price, line, 1);
       pendingOrder = null;
       continue;
     }
 
-    // 人名+數量：藝馨+1辣 / 秋蘭+2 / 翊婕*2
-    const orderMatch = line.match(/^(.+?)[+*]\s*(\d+)(.*)$/);
-    if (orderMatch && currentItem && currentPrice) {
+    // 人名+數量：慧明*0.5 / 安瑜*1 / 翊婕+2辣
+    const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)(.*)$/);
+    if (orderMatch && currentItem) {
       const name = orderMatch[1];
-      const qty = Number(orderMatch[2]);
+      const rawQty = orderMatch[2];
       const extra = orderMatch[3] || '';
       const note = extra.includes('辣') ? '辣' : '';
+      const price = getPrice(rawQty);
 
-      add(currentItem, currentPrice, name, qty, note);
+      add(currentItem, price, name, 1, note);
       continue;
     }
 
-    // 品項 + $金額 + 名字：打拋雞/中辣 $120 大芳
+    // 同一行：品項 + $金額 + 人名
     const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
     if (inlineSymbol) {
       add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
@@ -82,31 +97,11 @@ function parseOrders(text) {
     if (itemSymbol) {
       currentItem = itemSymbol[1];
       currentPrice = Number(itemSymbol[2]);
-      itemCount[clean(currentItem)] = itemCount[clean(currentItem)] || 0;
       itemBuffer = '';
       continue;
     }
 
-    // 品項換行 + 價格名字：焙香烏龍拿鐵熱 無糖(L)+仙草凍 / 70逸軒
-    const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
-    if (priceNameOnly && itemBuffer) {
-      add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    // 品項換行 + 價格單獨一行：桂花烏龍茶... / 55 / 心玄
-    const priceOnly = line.match(/^(\d{2,5})$/);
-    if (priceOnly && itemBuffer) {
-      pendingOrder = {
-        item: itemBuffer,
-        price: Number(priceOnly[1])
-      };
-      itemBuffer = '';
-      continue;
-    }
-
-    // 品項金額名字：熱帶水果茶無糖60美卉
+    // 品項金額名字：熱帶水果茶60美卉
     const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
     if (inlineNoSymbol && !/[+*]/.test(line)) {
       add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
@@ -114,7 +109,7 @@ function parseOrders(text) {
       continue;
     }
 
-    // 品項金額，名字下一行：熱帶水果茶無糖60 / 慧玲
+    // 品項金額，名字下一行
     const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
     if (noSymbolNoName && !/[+*]/.test(line)) {
       pendingOrder = {
@@ -125,8 +120,28 @@ function parseOrders(text) {
       continue;
     }
 
-    // 純文字：可能是品項被換到下一行，先暫存
+    // 價格名字：70逸軒
+    const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
+    if (priceNameOnly && itemBuffer) {
+      add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
+      itemBuffer = '';
+      continue;
+    }
+
+    // 價格單獨一行：55
+    const priceOnly = line.match(/^(\d{2,5})$/);
+    if (priceOnly && itemBuffer) {
+      pendingOrder = {
+        item: itemBuffer,
+        price: Number(priceOnly[1])
+      };
+      itemBuffer = '';
+      continue;
+    }
+
+    // 純品項：椒鹽 / 馬告 / 辣味椒鹽 / 原味不加
     if (!/[+*]/.test(line)) {
+      currentItem = line;
       itemBuffer = itemBuffer ? itemBuffer + line : line;
       continue;
     }
