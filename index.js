@@ -19,6 +19,13 @@ function cleanName(text) {
   return String(text || '').replace(/[。.,，\s]/g, '').trim();
 }
 
+function cleanItem(text) {
+  return String(text || '')
+    .replace(/\d+\s*顆/g, '')
+    .replace(/[。.,，]/g, '')
+    .trim();
+}
+
 function parseOrders(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const result = [];
@@ -29,49 +36,65 @@ function parseOrders(text) {
   function pushOrder(item, price, user, qty = 1) {
     for (let i = 0; i < qty; i++) {
       result.push({
-        item,
+        item: cleanItem(item),
         price,
         user: cleanName(user)
       });
     }
   }
 
-  for (const line of lines) {
-    if (/收錢|謝謝|下午|早上|晚上/.test(line)) continue;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
 
-    // ① 品項 + 金額：原味 $55 / 椒鹽 60 / 蔥肉餅+蛋 $55
-    const priceMatch = line.match(/^(.+?)\s*[💰$＄]?\s*(\d{1,4})$/);
-
-    if (priceMatch && !/[+*]\s*(半|\d+)/.test(line)) {
-      currentItem = priceMatch[1].trim();
-      currentPrice = Number(priceMatch[2]);
+    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上/.test(line)) {
       continue;
     }
 
-    // ② 名字 + 數量：慧玲+2 / 姿瑜*1 / 瑞琴*半
+    // ① 品項 + 金額：原味 $60 / 蔥肉餅+蛋 $55 / 肉鬆 💰60
+    // 重點：一定要有 $ / 💰 才認定是價格
+    const itemPriceMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,4})$/);
+
+    if (itemPriceMatch && !/[+*]\s*(半|\d+)/.test(line)) {
+      currentItem = cleanItem(itemPriceMatch[1]);
+      currentPrice = Number(itemPriceMatch[2]);
+      continue;
+    }
+
+    // ② 名字 + 數量：慧玲+2 / 香菇+2 / 瑞琴*半
+    // *半 算 1 份原價
     const qtyMatch = line.match(/^(.+?)[+*]\s*(半|\d+).*$/);
 
     if (qtyMatch && currentItem && currentPrice) {
       const user = qtyMatch[1];
-      const qty = qtyMatch[2] === '半' ? 1 : Number(qtyMatch[2]);
+      const rawQty = qtyMatch[2];
+      const qty = rawQty === '半' ? 1 : Number(rawQty);
+
       pushOrder(currentItem, currentPrice, user, qty);
       continue;
     }
 
     // ③ 飲料格式：珍珠奶茶微糖微冰 40士豪
-    const drinkMatch = line.match(/^(.+?)\s*(\d{1,4})\s*([^\d\s]+)?$/);
+    // 這種允許不用 $，因為後面有名字
+    const drinkMatch = line.match(/^(.+?)\s+(\d{1,4})\s*([^\d\s]+)$/);
 
     if (drinkMatch) {
-      const item = drinkMatch[1].trim();
+      const item = cleanItem(drinkMatch[1]);
       const price = Number(drinkMatch[2]);
-      const user = cleanName(drinkMatch[3] || '');
+      const user = cleanName(drinkMatch[3]);
 
-      if (user) {
-        pushOrder(item, price, user, 1);
-      } else {
-        currentItem = item;
-        currentPrice = price;
-      }
+      pushOrder(item, price, user, 1);
+      continue;
+    }
+
+    // ④ 純品項行：海苔6顆 / 原味 / 辣味
+    // 只設定目前品項，不計算
+    if (!/[+*]/.test(line)) {
+      const item = cleanItem(line);
+      if (!item) continue;
+
+      currentItem = item;
+      // 沒有金額就不會算錢，直到下一個「品項 $金額」出現
+      continue;
     }
   }
 
@@ -163,7 +186,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   const parsed = parseOrders(text);
   orders.push(...parsed);
 
-  // 加單不回覆，避免群組一直跳通知
   return res.sendStatus(200);
 });
 
