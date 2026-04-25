@@ -15,131 +15,164 @@ const client = new line.Client(config);
 let isOpen = false;
 let orders = [];
 
+function cleanName(text) {
+  return String(text || '').replace(/[。.,，\s]/g, '').trim();
+}
+
 function parseOrders(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const result = [];
 
   let currentItem = '';
   let currentPrice = 0;
-  let pendingGroups = [];
-  let pendingDrink = null;
 
-  function pushOrder(item, price, user = '', qty = 1, note = '') {
+  function pushOrder(item, price, user, qty = 1) {
     for (let i = 0; i < qty; i++) {
       result.push({
-        item: note ? `${item}（${note}）` : item,
+        item,
         price,
         user: cleanName(user)
       });
     }
   }
 
-  function getGroup(item) {
-    let group = pendingGroups.find(g => g.item === item);
-    if (!group) {
-      group = { item, lines: [] };
-      pendingGroups.push(group);
-    }
-    return group;
-  }
+  for (const line of lines) {
+    if (/收錢|謝謝|下午|早上|晚上/.test(line)) continue;
 
-  function flushPendingGroups(price) {
-    for (const group of pendingGroups) {
-      for (const qLine of group.lines) {
-        const qtyMatch = qLine.match(/^(.+?)[+*]\s*(半|\d+)(.*)$/);
-        if (!qtyMatch) continue;
+    // ① 品項 + 金額：原味 $55 / 椒鹽 60 / 蔥肉餅+蛋 $55
+    const priceMatch = line.match(/^(.+?)\s*[💰$＄]?\s*(\d{1,4})$/);
 
-        const user = qtyMatch[1];
-        const rawQty = qtyMatch[2];
-        const qty = rawQty === '半' ? 1 : Number(rawQty);
-        const note = rawQty === '半'
-          ? `半${qtyMatch[3].trim()}`
-          : qtyMatch[3].trim();
-
-        pushOrder(group.item, price, user, qty, note);
-      }
-    }
-
-    pendingGroups = [];
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (/收錢|謝謝|下午|早上|晚上/.test(line)) {
+    if (priceMatch && !/[+*]\s*(半|\d+)/.test(line)) {
+      currentItem = priceMatch[1].trim();
+      currentPrice = Number(priceMatch[2]);
       continue;
     }
 
-    if (pendingDrink && !pendingDrink.user && !/\d/.test(line)) {
-      pendingDrink.user = cleanName(line);
-      result.push(pendingDrink);
-      pendingDrink = null;
-      continue;
-    }
+    // ② 名字 + 數量：慧玲+2 / 姿瑜*1 / 瑞琴*半
+    const qtyMatch = line.match(/^(.+?)[+*]\s*(半|\d+).*$/);
 
-    if (pendingDrink) {
-      result.push(pendingDrink);
-      pendingDrink = null;
-    }
-
-    // 一個 💰 60 / 一個 $60 / 每個60 / 單價60
-    const priceOnlyMatch = line.match(/^(一個|每個|單價)?\s*[💰$＄]?\s*(\d{1,4})$/);
-    if (priceOnlyMatch && pendingGroups.length > 0) {
-      flushPendingGroups(Number(priceOnlyMatch[2]));
-      continue;
-    }
-
-    // 品項+價格：蔥肉餅+蛋 $55
-    const headerMatch = line.match(/^(.+?)\s*[💰$＄]?\s*(\d{2,4})$/);
-    const isQtyLine = /^.+?[+*]\s*(半|\d+)/.test(line);
-
-    if (headerMatch && !isQtyLine) {
-      currentItem = headerMatch[1].trim();
-      currentPrice = Number(headerMatch[2]);
-      continue;
-    }
-
-    // 姓名+數量：慧玲+2 / 瑞琴*半
-    const qtyMatch = line.match(/^(.+?)[+*]\s*(半|\d+)(.*)$/);
-
-    if (qtyMatch) {
+    if (qtyMatch && currentItem && currentPrice) {
       const user = qtyMatch[1];
-      const rawQty = qtyMatch[2];
-      const qty = rawQty === '半' ? 1 : Number(rawQty);
-      const note = rawQty === '半'
-        ? `半${qtyMatch[3].trim()}`
-        : qtyMatch[3].trim();
-
-      if (currentItem && currentPrice) {
-        pushOrder(currentItem, currentPrice, user, qty, note);
-      } else if (currentItem) {
-        getGroup(currentItem).lines.push(line);
-      }
+      const qty = qtyMatch[2] === '半' ? 1 : Number(qtyMatch[2]);
+      pushOrder(currentItem, currentPrice, user, qty);
       continue;
     }
 
-    // 飲料：珍珠奶茶微糖微冰 40士豪
-    const drinkMatch = line.match(/^(.+?)\s*(\d{2,4})\s*([^\d\s]+)?$/);
+    // ③ 飲料格式：珍珠奶茶微糖微冰 40士豪
+    const drinkMatch = line.match(/^(.+?)\s*(\d{1,4})\s*([^\d\s]+)?$/);
 
     if (drinkMatch) {
       const item = drinkMatch[1].trim();
       const price = Number(drinkMatch[2]);
       const user = cleanName(drinkMatch[3] || '');
 
-      pendingDrink = { item, price, user };
-      continue;
-    }
-
-    // 沒數字 = 品項名稱：原味 / 辣味 / 肉鬆
-    if (!/\d/.test(line)) {
-      currentItem = line;
-      currentPrice = 0;
-      getGroup(currentItem);
-      continue;
+      if (user) {
+        pushOrder(item, price, user, 1);
+      } else {
+        currentItem = item;
+        currentPrice = price;
+      }
     }
   }
 
-  if (pendingDrink) result.push(pendingDrink);
-
   return result;
 }
+
+app.post('/webhook', line.middleware(config), async (req, res) => {
+  const event = req.body.events[0];
+
+  if (!event || event.type !== 'message' || event.message.type !== 'text') {
+    return res.sendStatus(200);
+  }
+
+  const text = event.message.text.trim();
+
+  if (text === '開單') {
+    isOpen = true;
+    orders = [];
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '已開單，可以開始點餐'
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (text === '清空') {
+    orders = [];
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '已清空訂單'
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (text === '結單' || text === '統計' || text === '收單') {
+    isOpen = false;
+
+    if (orders.length === 0) {
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '目前沒有訂單'
+      });
+
+      return res.sendStatus(200);
+    }
+
+    let total = 0;
+    const itemCount = {};
+    const userTotal = {};
+
+    orders.forEach(order => {
+      total += order.price;
+      itemCount[order.item] = (itemCount[order.item] || 0) + 1;
+
+      const user = order.user || '未填';
+      userTotal[user] = (userTotal[user] || 0) + order.price;
+    });
+
+    let msg = '📊 訂餐統計\n\n【品項數量】\n';
+
+    Object.entries(itemCount).forEach(([item, count]) => {
+      msg += `${item} x${count}\n`;
+    });
+
+    msg += '\n【個人金額】\n';
+
+    Object.entries(userTotal).forEach(([user, amount]) => {
+      msg += `${user}：$${amount}\n`;
+    });
+
+    msg += `\n💰 總金額：$${total}`;
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: msg
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (!isOpen) {
+    return res.sendStatus(200);
+  }
+
+  const parsed = parseOrders(text);
+  orders.push(...parsed);
+
+  // 加單不回覆，避免群組一直跳通知
+  return res.sendStatus(200);
+});
+
+app.get('/', (req, res) => {
+  res.send('LINE 訂餐統計機器人運作中');
+});
+
+const port = process.env.PORT || 3000;
+
+app.listen(port, () => {
+  console.log(`Server running on ${port}`);
+});
