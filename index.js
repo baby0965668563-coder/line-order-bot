@@ -12,18 +12,15 @@ const config = {
 
 const client = new line.Client(config);
 
-// 狀態
 let isOpen = false;
 let allText = '';
 
-// 清理文字（去標點 空白）
 function clean(text) {
   return String(text || '')
     .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
     .trim();
 }
 
-// 解析訂單
 function parseOrders(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -135,34 +132,29 @@ function parseOrders(text) {
       continue;
     }
 
-    // 純文字：可能是品項，也可能是人名 +1
-if (!/[+*]/.test(line)) {
     if (!/[+*]/.test(line)) {
-    // 含「顆」通常是品項，例如：海苔6顆
-    if (/顆/.test(line)) {
+      if (/顆/.test(line)) {
+        currentItem = line;
+        currentPrice = 0;
+        itemBuffer = line;
+        continue;
+      }
+
+      if (currentItem) {
+        add(currentItem, currentPrice, line, 1);
+        continue;
+      }
+
       currentItem = line;
       currentPrice = 0;
       itemBuffer = line;
       continue;
     }
-
-    // 如果前面已經有品項，這行當作人名 +1
-    if (currentItem) {
-      add(currentItem, currentPrice, line, 1);
-      continue;
-    }
-
-    // 否則才暫存成品項
-    currentItem = line;
-    currentPrice = 0;
-    itemBuffer = line;
-    continue;
   }
-
-}
 
   return { itemCount, userTotal };
 }
+
 function formatResult(itemCount, userTotal) {
   let text = '📊 訂餐統計\n\n';
 
@@ -184,7 +176,6 @@ function formatResult(itemCount, userTotal) {
   return text;
 }
 
-// ⭐ 重點：不要用 express.json()
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
@@ -195,7 +186,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
 
     const text = event.message.text.trim();
 
-    // 開單（防呆）
     if (text === '開單') {
       if (isOpen) {
         await client.replyMessage(event.replyToken, {
@@ -216,7 +206,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 清空
     if (text === '清空') {
       allText = '';
       isOpen = false;
@@ -229,7 +218,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 結單 / 收單 / 統計
     if (text === '結單' || text === '收單' || text === '統計') {
       const result = parseOrders(allText);
       const reply = formatResult(result.itemCount, result.userTotal);
@@ -244,25 +232,21 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 收集訂單
     if (isOpen) {
       allText += '\n' + text;
     }
 
     return res.sendStatus(200);
-
   } catch (error) {
     console.error('Webhook error:', error);
     return res.sendStatus(200);
   }
 });
 
-// 測試用首頁
 app.get('/', (req, res) => {
   res.send('LINE 訂餐統計機器人運作中');
 });
 
-// 錯誤捕捉
 app.use((err, req, res, next) => {
   console.error('Global error:', err);
   res.sendStatus(200);
