@@ -16,7 +16,7 @@ let isOpen = false;
 let orders = [];
 
 function cleanName(text) {
-  return text.replace(/[。.,，\s]/g, '').trim();
+  return String(text || '').replace(/[。.,，\s]/g, '').trim();
 }
 
 function parseOrders(text) {
@@ -25,55 +25,126 @@ function parseOrders(text) {
 
   let currentItem = '';
   let currentPrice = 0;
-  let lastOrder = null;
+  let pendingItem = '';
+  let pendingQtyLines = [];
+  let pendingDrink = null;
 
-  for (const line of lines) {
-    // 食物格式：品項 $45
-    const itemPriceMatch = line.match(/^(.+?)\s*\$?\s*(\d+)$/);
-
-    if (itemPriceMatch && !/[+*]/.test(line)) {
-      currentItem = itemPriceMatch[1].trim();
-      currentPrice = Number(itemPriceMatch[2]);
-      lastOrder = null;
-      continue;
+  function pushOrder(item, price, user = '', qty = 1, note = '') {
+    for (let i = 0; i < qty; i++) {
+      result.push({
+        item: note ? `${item}（${note}）` : item,
+        price,
+        user: cleanName(user)
+      });
     }
-
-    // 食物格式：姓名 +2 辣 / 姓名*2
-    const qtyMatch = line.match(/^(.+?)[+*]\s*(\d+)(.*)$/);
-    if (qtyMatch && currentItem && currentPrice) {
-      const user = cleanName(qtyMatch[1]);
-      const qty = Number(qtyMatch[2]);
-      const note = qtyMatch[3].trim();
-
-      for (let i = 0; i < qty; i++) {
-        result.push({
-          item: note ? `${currentItem}（${note}）` : currentItem,
-          price: currentPrice,
-          user
-        });
-      }
-      lastOrder = null;
-      continue;
-    }
-
-    // 飲料格式：品項 60 姓名
-    const priceMatch = line.match(/(\d+)(?!.*\d)/);
-
-    if (!priceMatch) {
-      if (lastOrder && !lastOrder.user && line.length <= 6) {
-        lastOrder.user = cleanName(line);
-      }
-      continue;
-    }
-
-    const price = Number(priceMatch[1]);
-    const item = line.slice(0, priceMatch.index).trim();
-    const user = cleanName(line.slice(priceMatch.index + priceMatch[1].length));
-
-    const order = { item, price, user };
-    result.push(order);
-    lastOrder = order;
   }
+
+  function flushPendingQty(price) {
+    if (!pendingItem || pendingQtyLines.length === 0) return;
+
+    for (const qLine of pendingQtyLines) {
+      const qtyMatch = qLine.match(/^(.+?)[+*]\s*(半|\d+)(.*)$/);
+      if (!qtyMatch) continue;
+
+      const user = qtyMatch[1];
+      const rawQty = qtyMatch[2];
+      const qty = rawQty === '半' ? 1 : Number(rawQty);
+      const note = rawQty === '半'
+        ? `半${qtyMatch[3].trim()}`
+        : qtyMatch[3].trim();
+
+      pushOrder(pendingItem, price, user, qty, note);
+    }
+
+    pendingQtyLines = [];
+    pendingItem = '';
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (pendingDrink && !pendingDrink.user && !/\d/.test(line)) {
+      pendingDrink.user = cleanName(line);
+      result.push(pendingDrink);
+      pendingDrink = null;
+      continue;
+    }
+
+    if (pendingDrink) {
+      result.push(pendingDrink);
+      pendingDrink = null;
+    }
+
+    const priceOnlyMatch = line.match(/^(一個|每個|單價)?\s*\$?\s*(\d{2,3})$/);
+    if (priceOnlyMatch && pendingQtyLines.length > 0) {
+      flushPendingQty(Number(priceOnlyMatch[2]));
+      currentPrice = Number(priceOnlyMatch[2]);
+      continue;
+    }
+
+    const headerMatch = line.match(/^(.+?)\s*\$?\s*(\d{2,3})$/);
+    const isQtyLine = /^.+?[+*]\s*(半|\d+)/.test(line);
+
+    if (headerMatch && !isQtyLine) {
+      currentItem = headerMatch[1].trim();
+      currentPrice = Number(headerMatch[2]);
+      pendingItem = currentItem;
+      pendingQtyLines = [];
+      continue;
+    }
+
+    const qtyMatch = line.match(/^(.+?)[+*]\s*(半|\d+)(.*)$/);
+
+    if (qtyMatch) {
+      const user = qtyMatch[1];
+      const rawQty = qtyMatch[2];
+      const qty = rawQty === '半' ? 1 : Number(rawQty);
+      const note = rawQty === '半'
+        ? `半${qtyMatch[3].trim()}`
+        : qtyMatch[3].trim();
+
+      if (currentItem && currentPrice) {
+        pushOrder(currentItem, currentPrice, user, qty, note);
+      } else if (pendingItem) {
+        pendingQtyLines.push(line);
+      }
+      continue;
+    }
+
+    const drinkMatch = line.match(/^(.+?)\s*(\d{2,3})\s*([^\d\s]+)?$/);
+
+    if (drinkMatch) {
+      const item = drinkMatch[1].trim();
+      const price = Number(drinkMatch[2]);
+      const user = cleanName(drinkMatch[3] || '');
+
+      pendingDrink = { item, price, user };
+      continue;
+    }
+
+    const nextLine = lines[i + 1] || '';
+    const nextPriceMatch = nextLine.match(/^(\d{2,3})\s*([^\d\s]+)?$/);
+
+    if (nextPriceMatch) {
+      const item = line.trim();
+      const price = Number(nextPriceMatch[1]);
+      const user = cleanName(nextPriceMatch[2] || '');
+
+      pendingDrink = { item, price, user };
+      i++;
+      continue;
+    }
+
+    if (!/\d/.test(line)) {
+      currentItem = '';
+      currentPrice = 0;
+      pendingItem = line;
+      pendingQtyLines = [];
+      continue;
+    }
+  }
+
+  if (pendingDrink) result.push(pendingDrink);
 
   return result;
 }
@@ -124,6 +195,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     orders.forEach(order => {
       total += order.price;
       itemCount[order.item] = (itemCount[order.item] || 0) + 1;
+
       const user = order.user || '未填';
       userTotal[user] = (userTotal[user] || 0) + order.price;
     });
@@ -157,7 +229,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   const parsed = parseOrders(text);
   orders.push(...parsed);
 
-  // 加單時不回覆，避免群組一直跳通知
   return res.sendStatus(200);
 });
 
@@ -166,6 +237,7 @@ app.get('/', (req, res) => {
 });
 
 const port = process.env.PORT || 3000;
+
 app.listen(port, () => {
   console.log(`Server running on ${port}`);
 });
