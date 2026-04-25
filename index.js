@@ -36,16 +36,20 @@ function parseOrders(text) {
   const itemCount = {};
   const userTotal = {};
 
+  function cleanItemName(text) {
+    return clean(text).replace(/\d+顆/g, '');
+  }
+
   function add(item, price, name, qty = 1, note = '') {
-    item = clean(item);
+    item = cleanItemName(item);
     name = clean(name);
 
-    if (!item || !price || !name || !qty) return;
+    if (!item || !name || !qty) return;
 
     const finalItem = note ? `${item}（${note}）` : item;
 
     itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
-    userTotal[name] = (userTotal[name] || 0) + price;
+    userTotal[name] = (userTotal[name] || 0) + price * qty;
   }
 
   function getPrice(rawQty) {
@@ -57,21 +61,18 @@ function parseOrders(text) {
   for (let line of lines) {
     if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
 
-    // 價格表：0.5 $55 / 1 $110
     const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
     if (priceTable) {
       priceMap[priceTable[1]] = Number(priceTable[2]);
       continue;
     }
 
-    // 上一行是品項+價格，這行是名字
     if (pendingOrder && !/[+*]/.test(line) && !/\d/.test(line)) {
       add(pendingOrder.item, pendingOrder.price, line, 1);
       pendingOrder = null;
       continue;
     }
 
-    // 人名+數量：慧明*0.5 / 安瑜*1 / 翊婕+2辣
     const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)(.*)$/);
     if (orderMatch && currentItem) {
       const name = orderMatch[1];
@@ -79,12 +80,12 @@ function parseOrders(text) {
       const extra = orderMatch[3] || '';
       const note = extra.includes('辣') ? '辣' : '';
       const price = getPrice(rawQty);
+      const qty = rawQty === '半' || rawQty === '0.5' ? 1 : Number(rawQty);
 
-      add(currentItem, price, name, 1, note);
+      add(currentItem, price, name, qty, note);
       continue;
     }
 
-    // 同一行：品項 + $金額 + 人名
     const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
     if (inlineSymbol) {
       add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
@@ -92,7 +93,6 @@ function parseOrders(text) {
       continue;
     }
 
-    // 品項 + $金額：蔥肉餅+蛋 $55
     const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
     if (itemSymbol) {
       currentItem = itemSymbol[1];
@@ -101,7 +101,6 @@ function parseOrders(text) {
       continue;
     }
 
-    // 品項金額名字：熱帶水果茶60美卉
     const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
     if (inlineNoSymbol && !/[+*]/.test(line)) {
       add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
@@ -109,9 +108,8 @@ function parseOrders(text) {
       continue;
     }
 
-    // 品項金額，名字下一行
     const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
-    if (noSymbolNoName && !/[+*]/.test(line)) {
+    if (noSymbolNoName && !/[+*]/.test(line) && !/顆/.test(line)) {
       pendingOrder = {
         item: noSymbolNoName[1],
         price: Number(noSymbolNoName[2])
@@ -120,7 +118,6 @@ function parseOrders(text) {
       continue;
     }
 
-    // 價格名字：70逸軒
     const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
     if (priceNameOnly && itemBuffer) {
       add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
@@ -128,7 +125,6 @@ function parseOrders(text) {
       continue;
     }
 
-    // 價格單獨一行：55
     const priceOnly = line.match(/^(\d{2,5})$/);
     if (priceOnly && itemBuffer) {
       pendingOrder = {
@@ -139,13 +135,28 @@ function parseOrders(text) {
       continue;
     }
 
-    // 純品項：椒鹽 / 馬告 / 辣味椒鹽 / 原味不加
-    if (!/[+*]/.test(line)) {
-      currentItem = line;
-      itemBuffer = itemBuffer ? itemBuffer + line : line;
-      continue;
-    }
+    // 純文字：可能是品項，也可能是人名 +1
+if (!/[+*]/.test(line)) {
+  // 含「顆」通常是品項，例如：海苔6顆
+  if (/顆/.test(line)) {
+    currentItem = line;
+    currentPrice = 0;
+    itemBuffer = line;
+    continue;
   }
+
+  // 如果前面已經有品項，這行當作人名 +1
+  if (currentItem) {
+    add(currentItem, currentPrice, line, 1);
+    continue;
+  }
+
+  // 否則才暫存成品項
+  currentItem = line;
+  currentPrice = 0;
+  itemBuffer = line;
+  continue;
+}
 
   return { itemCount, userTotal };
 }
