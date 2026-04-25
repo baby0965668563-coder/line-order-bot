@@ -26,12 +26,26 @@ function cleanItem(text) {
     .trim();
 }
 
+function qtyToCount(rawQty) {
+  if (rawQty === '半' || rawQty === '0.5') return 1;
+  if (rawQty === '1') return 2;
+  return Number(rawQty);
+}
+
 function parseOrders(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const result = [];
 
   let currentItem = '';
   let currentPrice = 0;
+  let priceMap = {};
+
+  function getPrice(rawQty) {
+    if (rawQty === '半' && priceMap['0.5']) return priceMap['0.5'];
+    if (rawQty === '0.5' && priceMap['半']) return priceMap['半'];
+    if (priceMap[rawQty]) return priceMap[rawQty];
+    return currentPrice;
+  }
 
   function pushOrder(item, price, user, qty = 1) {
     for (let i = 0; i < qty; i++) {
@@ -50,50 +64,61 @@ function parseOrders(text) {
       continue;
     }
 
-    // ① 品項 + 金額：原味 $60 / 蔥肉餅+蛋 $55 / 肉鬆 💰60
-    // 重點：一定要有 $ / 💰 才認定是價格
+    // 價格表：0.5 $55 / 1 $110 / 半$55
+    const priceTable = [...line.matchAll(/(半|0\.5|1)\s*[💰$＄]\s*(\d{1,4})/g)];
+    if (priceTable.length > 0) {
+      priceMap = {};
+      priceTable.forEach(m => {
+        priceMap[m[1]] = Number(m[2]);
+      });
+      continue;
+    }
+
+    // 品項 + 金額：原味 $60 / 辣味 💰60
     const itemPriceMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,4})$/);
 
-    if (itemPriceMatch && !/[+*]\s*(半|\d+)/.test(line)) {
+    if (itemPriceMatch && !/[+*]\s*(半|0\.5|\d+)/.test(line)) {
       currentItem = cleanItem(itemPriceMatch[1]);
       currentPrice = Number(itemPriceMatch[2]);
+      priceMap = {};
       continue;
     }
 
-    // ② 名字 + 數量：慧玲+2 / 香菇+2 / 瑞琴*半
-    // *半 算 1 份原價
-    const qtyMatch = line.match(/^(.+?)[+*]\s*(半|\d+).*$/);
+    // 名字 + 數量：慧玲+2 / 香菇+2 / 瑞琴*半 / 慧明+0.5
+    const qtyMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+).*$/);
 
-    if (qtyMatch && currentItem && currentPrice) {
+    if (qtyMatch && currentItem) {
       const user = qtyMatch[1];
       const rawQty = qtyMatch[2];
-      const qty = rawQty === '半' ? 1 : Number(rawQty);
+      const qty = qtyToCount(rawQty);
+      const price = getPrice(rawQty);
 
-      pushOrder(currentItem, currentPrice, user, qty);
+      if (price) {
+        pushOrder(currentItem, price, user, qty);
+      }
       continue;
     }
 
-    // ③ 飲料格式：珍珠奶茶微糖微冰 40士豪
-    // 這種允許不用 $，因為後面有名字
+    // 飲料格式：珍珠奶茶微糖微冰 40士豪
     const drinkMatch = line.match(/^(.+?)\s+(\d{1,4})\s*([^\d\s]+)$/);
 
     if (drinkMatch) {
-      const item = cleanItem(drinkMatch[1]);
-      const price = Number(drinkMatch[2]);
-      const user = cleanName(drinkMatch[3]);
-
-      pushOrder(item, price, user, 1);
+      pushOrder(
+        cleanItem(drinkMatch[1]),
+        Number(drinkMatch[2]),
+        drinkMatch[3],
+        1
+      );
       continue;
     }
 
-    // ④ 純品項行：海苔6顆 / 原味 / 辣味
-    // 只設定目前品項，不計算
+    // 純品項行：椒鹽 / 馬告 / 原味不加
     if (!/[+*]/.test(line)) {
       const item = cleanItem(line);
       if (!item) continue;
 
       currentItem = item;
-      // 沒有金額就不會算錢，直到下一個「品項 $金額」出現
+      currentPrice = 0;
       continue;
     }
   }
