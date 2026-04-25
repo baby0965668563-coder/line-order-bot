@@ -17,7 +17,7 @@ let allText = '';
 
 function clean(text) {
   return String(text || '')
-    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '')
+    .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
     .trim();
 }
 
@@ -30,72 +30,44 @@ function parseOrders(text) {
   const itemCount = {};
   const userTotal = {};
 
-  function add(item, price, name, qty = 1) {
+  function add(item, price, name, qty, note = '') {
     item = clean(item);
     name = clean(name);
 
-    if (!item || !price || !name) return;
+    if (!item || !price || !name || !qty) return;
 
-    itemCount[item] = (itemCount[item] || 0) + qty;
+    const finalItem = note ? `${item}（${note}）` : item;
+
+    itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
     userTotal[name] = (userTotal[name] || 0) + price * qty;
   }
 
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
+  for (let line of lines) {
+    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上/.test(line)) continue;
 
-    if (/收錢|謝謝|下午|早上|晚上/.test(line)) continue;
+    // 品項 + 價格：蔥肉餅 $45 / 紅豆餅💰25
+    const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d+)/);
 
-    // 👉 抓價格（有$ / 💰 / 或純數字）
-    let priceMatch = line.match(/(\d{2,4})/);
-
-    // 👉 抓數量（+1、*2、1份都吃）
-    let qtyMatch = line.match(/(\d+)/);
-
-    // 👉 抓名字（中文）
-    let nameMatch = line.match(/[\u4e00-\u9fa5]{2,4}/g);
-
-    // 👉 情境1：品項+價格
-    if (/[💰$]/.test(line)) {
-      currentPrice = parseInt(priceMatch?.[1] || 0);
-      currentItem = clean(line.replace(/[💰$]\s*\d+/, ''));
+    if (itemMatch && !/[+*]/.test(line)) {
+      currentItem = itemMatch[1];
+      currentPrice = Number(itemMatch[2]);
+      itemCount[clean(currentItem)] = itemCount[clean(currentItem)] || 0;
       continue;
     }
 
-    // 👉 情境2：品項+價格+名字（同一行）
-    if (priceMatch && nameMatch && !/[+*]/.test(line)) {
-      let item = clean(line.replace(nameMatch[nameMatch.length - 1], '').replace(/\d+/g, ''));
-      let name = nameMatch[nameMatch.length - 1];
-      let price = parseInt(priceMatch[1]);
+    // 人名 + 數量 + 備註：藝馨+1辣 / 姿瑜*2
+    const orderMatch = line.match(/^(.+?)[+*]\s*(\d+)(.*)$/);
 
-      add(item, price, name, 1);
+    if (orderMatch && currentItem && currentPrice) {
+      const name = orderMatch[1];
+      const qty = Number(orderMatch[2]);
+      const extra = orderMatch[3] || '';
+
+      let note = '';
+      if (extra.includes('辣')) note = '辣';
+
+      add(currentItem, currentPrice, name, qty, note);
       continue;
-    }
-
-    // 👉 情境3：名字+數量
-    if (/[+*]/.test(line) && currentItem && currentPrice) {
-      let name = nameMatch?.[0];
-      let qty = parseInt(qtyMatch?.[1] || 1);
-
-      add(currentItem, currentPrice, name, qty);
-      continue;
-    }
-
-    // 👉 情境4：價格在下一行
-    if (!/[+*]/.test(line) && !priceMatch) {
-      let next = lines[i + 1] || '';
-
-      if (/^\d{2,4}$/.test(next)) {
-        currentItem = clean(line);
-        currentPrice = parseInt(next);
-        i++;
-        continue;
-      }
-    }
-
-    // 👉 情境5：名字單獨一行（接上一筆）
-    if (!/[+*]/.test(line) && currentItem && currentPrice) {
-      let name = nameMatch?.[0];
-      if (name) add(currentItem, currentPrice, name, 1);
     }
   }
 
@@ -107,7 +79,9 @@ function formatResult(itemCount, userTotal) {
 
   text += '【品項數量】\n';
   for (let item in itemCount) {
-    text += `${item} x${itemCount[item]}\n`;
+    if (itemCount[item] > 0) {
+      text += `${item} x${itemCount[item]}\n`;
+    }
   }
 
   text += '\n【個人金額】\n';
@@ -124,36 +98,69 @@ function formatResult(itemCount, userTotal) {
 app.use(express.json());
 
 app.post('/webhook', line.middleware(config), async (req, res) => {
-  const event = req.body.events[0];
+  try {
+    const event = req.body.events[0];
 
-  if (!event || event.type !== 'message') return res.sendStatus(200);
+    if (!event || event.type !== 'message' || event.message.type !== 'text') {
+      return res.sendStatus(200);
+    }
 
-  const text = event.message.text.trim();
+    const text = event.message.text.trim();
 
-  if (text === '開單') {
-    isOpen = true;
-    allText = '';
-    await client.replyMessage(event.replyToken, { type: 'text', text: '已開單' });
+    if (text === '開單') {
+      isOpen = true;
+      allText = '';
+
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '已開單，可以開始點餐'
+      });
+
+      return res.sendStatus(200);
+    }
+
+    if (text === '清空') {
+      allText = '';
+
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '已清空訂單'
+      });
+
+      return res.sendStatus(200);
+    }
+
+    if (text === '結單' || text === '收單' || text === '統計') {
+      const result = parseOrders(allText);
+      const reply = formatResult(result.itemCount, result.userTotal);
+
+      isOpen = false;
+
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: reply
+      });
+
+      return res.sendStatus(200);
+    }
+
+    if (isOpen) {
+      allText += '\n' + text;
+    }
+
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error(error);
     return res.sendStatus(200);
   }
-
-  if (text === '結單' || text === '收單' || text === '統計') {
-    const result = parseOrders(allText);
-    const reply = formatResult(result.itemCount, result.userTotal);
-    isOpen = false;
-
-    await client.replyMessage(event.replyToken, { type: 'text', text: reply });
-    return res.sendStatus(200);
-  }
-
-  if (isOpen) {
-    allText += '\n' + text;
-  }
-
-  return res.sendStatus(200);
 });
 
-app.get('/', (req, res) => res.send('ok'));
+app.get('/', (req, res) => {
+  res.send('LINE 訂餐統計機器人運作中');
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('running ' + PORT));
+
+app.listen(PORT, () => {
+  console.log('Server running on ' + PORT);
+});
