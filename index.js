@@ -51,7 +51,6 @@ function parseOrders(text) {
     if (itemMatch && !/[+*]/.test(line)) {
       currentItem = itemMatch[1];
       currentPrice = Number(itemMatch[2]);
-      itemCount[clean(currentItem)] = itemCount[clean(currentItem)] || 0;
       continue;
     }
 
@@ -108,6 +107,14 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     const text = event.message.text.trim();
 
     if (text === '開單') {
+      if (isOpen) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '目前已開單中，不會清空訂單'
+        });
+        return res.sendStatus(200);
+      }
+
       isOpen = true;
       allText = '';
 
@@ -121,6 +128,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
 
     if (text === '清空') {
       allText = '';
+      isOpen = false;
 
       await client.replyMessage(event.replyToken, {
         type: 'text',
