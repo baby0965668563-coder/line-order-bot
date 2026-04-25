@@ -12,15 +12,18 @@ const config = {
 
 const client = new line.Client(config);
 
+// 狀態
 let isOpen = false;
 let allText = '';
 
+// 清理文字（去標點 空白）
 function clean(text) {
   return String(text || '')
     .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
     .trim();
 }
 
+// 解析訂單
 function parseOrders(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
@@ -43,10 +46,12 @@ function parseOrders(text) {
   }
 
   for (let line of lines) {
+
+    // 過濾垃圾文字
     if (/今天有人要訂|收錢|謝謝|下午|早上|晚上/.test(line)) continue;
 
-    // 品項 + 價格：蔥肉餅 $45 / 紅豆餅💰25
-    const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d+)/);
+    // ⭐ 抓品項 + 金額（不管前後空白）
+    const itemMatch = line.match(/(.+?)\s*[💰$＄]\s*(\d+)/);
 
     if (itemMatch && !/[+*]/.test(line)) {
       currentItem = itemMatch[1];
@@ -54,8 +59,8 @@ function parseOrders(text) {
       continue;
     }
 
-    // 人名 + 數量 + 備註：藝馨+1辣 / 姿瑜*2
-    const orderMatch = line.match(/^(.+?)[+*]\s*(\d+)(.*)$/);
+    // ⭐ 抓人名 + 數量 + 辣
+    const orderMatch = line.match(/(.+?)[+*]\s*(\d+)(.*)/);
 
     if (orderMatch && currentItem && currentPrice) {
       const name = orderMatch[1];
@@ -66,21 +71,19 @@ function parseOrders(text) {
       if (extra.includes('辣')) note = '辣';
 
       add(currentItem, currentPrice, name, qty, note);
-      continue;
     }
   }
 
   return { itemCount, userTotal };
 }
 
+// 輸出結果
 function formatResult(itemCount, userTotal) {
   let text = '📊 訂餐統計\n\n';
 
   text += '【品項數量】\n';
   for (let item in itemCount) {
-    if (itemCount[item] > 0) {
-      text += `${item} x${itemCount[item]}\n`;
-    }
+    text += `${item} x${itemCount[item]}\n`;
   }
 
   text += '\n【個人金額】\n';
@@ -94,8 +97,7 @@ function formatResult(itemCount, userTotal) {
   return text;
 }
 
-app.use(express.json());
-
+// ⭐ 重點：不要用 express.json()
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
@@ -106,6 +108,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
 
     const text = event.message.text.trim();
 
+    // 開單（防呆）
     if (text === '開單') {
       if (isOpen) {
         await client.replyMessage(event.replyToken, {
@@ -126,6 +129,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // 清空
     if (text === '清空') {
       allText = '';
       isOpen = false;
@@ -138,6 +142,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // 結單 / 收單 / 統計
     if (text === '結單' || text === '收單' || text === '統計') {
       const result = parseOrders(allText);
       const reply = formatResult(result.itemCount, result.userTotal);
@@ -152,19 +157,28 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // 收集訂單
     if (isOpen) {
       allText += '\n' + text;
     }
 
     return res.sendStatus(200);
+
   } catch (error) {
-    console.error(error);
+    console.error('Webhook error:', error);
     return res.sendStatus(200);
   }
 });
 
+// 測試用首頁
 app.get('/', (req, res) => {
   res.send('LINE 訂餐統計機器人運作中');
+});
+
+// 錯誤捕捉
+app.use((err, req, res, next) => {
+  console.error('Global error:', err);
+  res.sendStatus(200);
 });
 
 const PORT = process.env.PORT || 3000;
