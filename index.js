@@ -29,6 +29,7 @@ function parseOrders(text) {
 
   let currentItem = '';
   let currentPrice = 0;
+  let pendingOrder = null;
 
   const itemCount = {};
   const userTotal = {};
@@ -52,6 +53,18 @@ function parseOrders(text) {
 
     // ⭐ 抓品項 + 金額（不管前後空白）
     const itemMatch = line.match(/(.+?)\s*[💰$＄]\s*(\d+)/);
+
+    // ⭐ 新增：沒有 $ 的寫法（飲料會用到）
+    const inlineNoSymbol = line.match(/^(.+?)(\d{2,4})([^\d\s]+)$/);
+
+    if (inlineNoSymbol && !/[+*]/.test(line)) {
+  const item = inlineNoSymbol[1];
+  const price = Number(inlineNoSymbol[2]);
+  const name = inlineNoSymbol[3];
+
+  add(item, price, name, 1);
+  continue;
+}
     
     // ✅ 新增：同一行「品項 + 金額 + 人名」
     const inlineMatch = line.match(/(.+?)[💰$]\s*(\d+)\s*([^\d\s]+)/);
