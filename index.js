@@ -53,7 +53,7 @@ function parseOrders(text) {
     // ⭐ 抓品項 + 金額（不管前後空白）
     const itemMatch = line.match(/(.+?)\s*[💰$＄]\s*(\d+)/);
 
-    if (itemMatch && !/[+*]/.test(line)) {
+    if (itemMatch) {
       currentItem = itemMatch[1];
       currentPrice = Number(itemMatch[2]);
       continue;
