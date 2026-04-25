@@ -52,7 +52,24 @@ function parseOrders(text) {
 
     // ⭐ 抓品項 + 金額（不管前後空白）
     const itemMatch = line.match(/(.+?)\s*[💰$＄]\s*(\d+)/);
+    
+    // ✅ 新增：同一行「品項 + 金額 + 人名」
+    const inlineMatch = line.match(/(.+?)[💰$]\s*(\d+)\s*([^\d\s]+)/);
 
+    if (inlineMatch) {
+  const item = inlineMatch[1].trim();
+  const price = parseInt(inlineMatch[2]);
+  const user = inlineMatch[3].trim();
+
+  // 初始化
+  if (!itemCount[item]) itemCount[item] = 0;
+  if (!userTotal[user]) userTotal[user] = 0;
+
+  itemCount[item] += 1;
+  userTotal[user] += price;
+
+  continue; // ⚠️ 很重要！避免被下面邏輯再跑一次
+}
     if (itemMatch) {
       currentItem = itemMatch[1];
       currentPrice = Number(itemMatch[2]);
