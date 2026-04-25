@@ -1,3 +1,20 @@
+require('dotenv').config();
+
+const express = require('express');
+const line = require('@line/bot-sdk');
+
+const app = express();
+
+const config = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET
+};
+
+const client = new line.Client(config);
+
+let isOpen = false;
+let allText = '';
+
 function parseOrders(text) {
   const lines = text.split('\n');
 
@@ -11,39 +28,32 @@ function parseOrders(text) {
     let line = rawLine.trim();
     if (!line) continue;
 
-    // ✅ 抓「品項 + 價格」(支援 $ 💰 ＄)
     const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d+)/);
+
     if (itemMatch) {
       currentItem = itemMatch[1].trim();
       currentPrice = parseInt(itemMatch[2]);
 
-      if (!itemCount[currentItem]) {
-        itemCount[currentItem] = 0;
-      }
+      if (!itemCount[currentItem]) itemCount[currentItem] = 0;
       continue;
     }
 
-    // ✅ 抓「名字 + 數量」(+ 或 *)
     const orderMatch = line.match(/^(.+?)[+*](\d+)/);
+
     if (orderMatch && currentItem) {
       const name = orderMatch[1].trim();
       const qty = parseInt(orderMatch[2]);
 
-      // 累加品項數量
       itemCount[currentItem] += qty;
 
-      // 累加個人金額
       if (!userTotal[name]) userTotal[name] = 0;
       userTotal[name] += qty * currentPrice;
-
-      continue;
     }
-
-    // ❌ 其他全部忽略（時間、備註、垃圾字）
   }
 
   return { itemCount, userTotal };
 }
+
 function formatResult(itemCount, userTotal) {
   let text = '📊 訂餐統計\n\n';
 
@@ -54,11 +64,74 @@ function formatResult(itemCount, userTotal) {
 
   text += '\n【個人金額】\n';
   for (let user in userTotal) {
-    text += `${user} : $${userTotal[user]}\n`;
+    text += `${user}：$${userTotal[user]}\n`;
   }
 
   const total = Object.values(userTotal).reduce((a, b) => a + b, 0);
-  text += `\n\n💰 總金額：$${total}`;
+  text += `\n💰 總金額：$${total}`;
 
   return text;
 }
+
+app.post('/webhook', line.middleware(config), async (req, res) => {
+  const event = req.body.events[0];
+
+  if (!event || event.type !== 'message' || event.message.type !== 'text') {
+    return res.sendStatus(200);
+  }
+
+  const text = event.message.text.trim();
+
+  if (text === '開單') {
+    isOpen = true;
+    allText = '';
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '已開單，可以開始點餐'
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (text === '清空') {
+    allText = '';
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '已清空訂單'
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (text === '結單' || text === '收單' || text === '統計') {
+    const result = parseOrders(allText);
+    const reply = formatResult(result.itemCount, result.userTotal);
+
+    isOpen = false;
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: reply
+    });
+
+    return res.sendStatus(200);
+  }
+
+  if (isOpen) {
+    allText += '\n' + text;
+  }
+
+  return res.sendStatus(200);
+});
+
+app.get('/', (req, res) => {
+  res.send('LINE 訂餐統計機器人運作中');
+});
+
+const port = process.env.PORT || 3000;
+
+app.listen(port, () => {
+  console.log(`Server running on ${port}`);
+});
