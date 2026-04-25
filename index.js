@@ -20,8 +20,9 @@ function parseOrders(text) {
 
   let currentItem = null;
   let currentPrice = 0;
-  let priceMap = {};
   let pendingDrink = null;
+  let pendingItemLine = null;
+  let priceMap = {};
 
   const itemCount = {};
   const userTotal = {};
@@ -30,13 +31,14 @@ function parseOrders(text) {
     return String(name || '').replace(/[。.,，\s]/g, '').trim();
   }
 
-  function addOrder(item, price, name, count = 1) {
+  function addOrder(item, price, name, qty = 1) {
     item = String(item || '').trim();
     name = cleanName(name);
-    if (!item || !name) return;
 
-    itemCount[item] = (itemCount[item] || 0) + count;
-    userTotal[name] = (userTotal[name] || 0) + price * count;
+    if (!item || !price || !name) return;
+
+    itemCount[item] = (itemCount[item] || 0) + qty;
+    userTotal[name] = (userTotal[name] || 0) + price * qty;
   }
 
   function getPrice(rawQty) {
@@ -46,74 +48,81 @@ function parseOrders(text) {
     return currentPrice;
   }
 
-  for (let line of lines) {
+  function getQty(rawQty) {
+    if (rawQty === '半' || rawQty === '0.5') return 1;
+    return parseInt(rawQty, 10);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+
     if (/今天有人要訂|收錢|謝謝|下午|早上|晚上/.test(line)) continue;
 
-    // 飲料上一行沒名字，這行補名字
+    // 價格表：0.5 $55 / 1 $110 / 半 $55
+    const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d+)$/);
+    if (priceTable) {
+      priceMap[priceTable[1]] = parseInt(priceTable[2], 10);
+      continue;
+    }
+
+    // 飲料：上一筆缺姓名，這行補姓名
     if (pendingDrink && !/\d/.test(line) && !/[+*]/.test(line)) {
-      addOrder(pendingDrink.item, pendingDrink.price, line, 1);
+      addOrder(pendingDrink.item, pendingDrink.price, line);
       pendingDrink = null;
       continue;
     }
 
-    // 價格表：0.5 $55 / 1 $110 / 半 $55
-    const priceTable = [...line.matchAll(/(半|\d+(?:\.\d+)?)\s*[💰$＄]\s*(\d+)/g)];
-    if (priceTable.length > 0 && /^[半\d]/.test(line)) {
-      priceMap = {};
-      priceTable.forEach(m => {
-        priceMap[m[1]] = parseInt(m[2], 10);
-      });
-      continue;
-    }
-
-    // 品項 + $價格：蔥肉餅 $45 / 紅豆餅💰25
+    // 品項 $金額：午餐/下午茶
     const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d+)/);
     if (itemMatch && !/[+*]/.test(line)) {
-      pendingDrink = null;
       currentItem = itemMatch[1].trim();
       currentPrice = parseInt(itemMatch[2], 10);
-      priceMap = {};
       itemCount[currentItem] = itemCount[currentItem] || 0;
       continue;
     }
 
-    // 名字 + 數量：慧明*0.5 / 姿瑜*1 / 心玄+2 / 瑞琴*半
-    const orderMatch = line.match(/^(.+?)[+*]\s*(半|\d+(?:\.\d+)?)/);
+    // 人名+數量：芷葳+2 / 心玄*3 / 慧明*0.5 / 瑞琴*半
+    const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)/);
     if (orderMatch && currentItem) {
-      const name = orderMatch[1].trim();
+      const name = orderMatch[1];
       const rawQty = orderMatch[2];
+      const qty = getQty(rawQty);
       const price = getPrice(rawQty);
 
-      // 0.5 / 半 算 1 筆；1 算 1 筆；2 算 2 筆
-      const count =
-        rawQty === '0.5' || rawQty === '半'
-          ? 1
-          : parseInt(rawQty, 10);
-
-      addOrder(currentItem, price, name, count);
+      addOrder(currentItem, price, name, qty);
       continue;
     }
 
-    // 飲料：品項40名字 / 品項 40 名字 / 品項55 下一行名字
-    const drinkMatch = line.match(/^(.+?)\s*(\d{2,4})\s*([^\d\s]+)?$/);
-    if (drinkMatch && !/[+*]/.test(line)) {
-      const item = drinkMatch[1].trim();
-      const price = parseInt(drinkMatch[2], 10);
-      const name = drinkMatch[3] || '';
-
-      if (name) {
-        addOrder(item, price, name, 1);
-      } else {
-        pendingDrink = { item, price };
-      }
+    // 飲料：品項40姓名 / 品項 40 姓名
+    const drinkFull = line.match(/^(.+?)\s*(\d{2,4})\s*([^\d\s]+)$/);
+    if (drinkFull && !/[+*]/.test(line)) {
+      addOrder(drinkFull[1].trim(), parseInt(drinkFull[2], 10), drinkFull[3]);
       continue;
     }
 
-    // 純品項：椒鹽 / 馬告 / 辣味椒鹽
-    if (!/[+*]/.test(line)) {
-      currentItem = line.trim();
-      currentPrice = 0;
-      itemCount[currentItem] = itemCount[currentItem] || 0;
+    // 飲料：品項40 / 品項 40，姓名下一行
+    const drinkNoName = line.match(/^(.+?)\s*(\d{2,4})$/);
+    if (drinkNoName && !/[+*]/.test(line)) {
+      pendingDrink = {
+        item: drinkNoName[1].trim(),
+        price: parseInt(drinkNoName[2], 10)
+      };
+      continue;
+    }
+
+    // 飲料：品項一行、價格一行、姓名一行
+    if (!/\d/.test(line) && !/[+*]/.test(line)) {
+      pendingItemLine = line;
+      continue;
+    }
+
+    // 價格單獨一行：55
+    if (/^\d{2,4}$/.test(line) && pendingItemLine) {
+      pendingDrink = {
+        item: pendingItemLine,
+        price: parseInt(line, 10)
+      };
+      pendingItemLine = null;
       continue;
     }
   }
