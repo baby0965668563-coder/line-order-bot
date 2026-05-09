@@ -183,7 +183,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
 
-    if (!event || event.type !== 'message' {
+   if (!event || event.type !== 'message') {
       return res.sendStatus(200);
     }
 console.log("來源類型：", event.source.type);
