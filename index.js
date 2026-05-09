@@ -384,6 +384,7 @@ app.get('/order', async (req, res) => {
     }
   </style>
 </head>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <body>
   <div class="header">
     <h2>訂餐小幫手</h2>
@@ -417,11 +418,30 @@ app.get('/order', async (req, res) => {
     html += `
   </div>
 <script>
+<script>
+
+let profile = null;
+
+async function initLIFF() {
+
+  await liff.init({
+    liffId: '2010025093-yATK02dc'
+  });
+
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+
+  profile = await liff.getProfile();
+
+  console.log(profile);
+}
 async function addOrder(store, item, price) {
 
   const orderData = {
-    name: '測試使用者',
-    userId: 'test-user',
+    name: profile?.displayName || '',
+userId: profile?.userId || '',
     store: store,
     item: item,
     spec: '',
@@ -446,6 +466,7 @@ async function addOrder(store, item, price) {
     alert('加入失敗');
   }
 }
+initLIFF();
 </script>
 </body>
 </html>
