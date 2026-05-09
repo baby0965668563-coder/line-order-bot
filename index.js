@@ -439,6 +439,43 @@ async function initLIFF() {
 }
 async function addOrder(store, item, price) {
 
+  alert('按鈕有反應，準備送出');
+
+  const orderData = {
+    name: '測試使用者',
+    userId: 'test-user',
+    store: store,
+    item: item,
+    spec: '',
+    note: '',
+    qty: 1,
+    price: price
+  };
+
+  try {
+    const res = await fetch('https://line-order-bot-fomq.onrender.com/api/order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(orderData)
+    });
+
+    alert('API狀態：' + res.status);
+
+    const result = await res.json();
+
+    if (result.success) {
+      alert('已加入訂單');
+    } else {
+      alert('加入失敗');
+    }
+
+  } catch (err) {
+    alert('送出失敗：' + err.message);
+  }
+}
+
   console.log('點擊加入訂單');
   alert('按鈕有反應');
 
