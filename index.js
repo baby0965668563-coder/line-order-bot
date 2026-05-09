@@ -40,16 +40,15 @@ async function authSheet() {
 
 async function loadMenu() {
   await authSheet();
-
   const sheet = doc.sheetsByTitle['Menu'];
   if (!sheet) return [];
 
   const rows = await sheet.getRows();
 
   return rows.map(r => ({
-    store: r['店家'],
-    item: r['品項'],
-    price: r['價格']
+    store: r['店家'] || '',
+    item: r['品項'] || '',
+    price: r['價格'] || 0
   }));
 }
 
@@ -58,10 +57,7 @@ async function saveUserToSheet(profileName, userId, sourceType, groupId) {
     await authSheet();
 
     const sheet = doc.sheetsByTitle['Users'];
-    if (!sheet) {
-      console.error('找不到 Users 分頁');
-      return;
-    }
+    if (!sheet) return;
 
     await sheet.addRow({
       時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
@@ -172,6 +168,7 @@ function parseOrders(text) {
       const note = extra.includes('辣') ? '辣' : '';
       const price = getPrice(rawQty);
       const qty = rawQty === '半' || rawQty === '0.5' ? 1 : Number(rawQty);
+
       add(currentItem, price, name, qty, note);
       continue;
     }
@@ -298,8 +295,9 @@ app.get('/', (req, res) => {
 app.get('/order', async (req, res) => {
   try {
     const menu = await loadMenu();
+    const menuJson = JSON.stringify(menu).replace(/</g, '\\u003c');
 
-    let html = `
+    const html = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -317,7 +315,7 @@ app.get('/order', async (req, res) => {
 
     .header {
       padding: 20px;
-      background: #ffffff;
+      background: #fff;
       border-bottom: 1px solid #eee;
       position: sticky;
       top: 0;
@@ -326,13 +324,19 @@ app.get('/order', async (req, res) => {
 
     .header h2 {
       margin: 0;
-      font-size: 22px;
+      font-size: 24px;
     }
 
     .header p {
-      margin: 6px 0 0;
+      margin: 8px 0 0;
       color: #777;
+      font-size: 15px;
+    }
+
+    .status {
+      margin-top: 10px;
       font-size: 14px;
+      color: #06c755;
     }
 
     .container {
@@ -354,26 +358,29 @@ app.get('/order', async (req, res) => {
     }
 
     .item {
-      font-size: 18px;
+      font-size: 20px;
       font-weight: bold;
       margin-bottom: 8px;
     }
 
     .price {
-      font-size: 16px;
+      font-size: 17px;
       margin-bottom: 12px;
-      color: #444;
     }
 
     button {
       width: 100%;
-      padding: 12px;
+      padding: 13px;
       border: none;
       border-radius: 999px;
       background: #06c755;
       color: white;
       font-size: 16px;
       font-weight: bold;
+    }
+
+    button:disabled {
+      background: #aaa;
     }
 
     .empty {
@@ -388,39 +395,53 @@ app.get('/order', async (req, res) => {
   <div class="header">
     <h2>訂餐小幫手</h2>
     <p>請選擇今天要訂的餐點</p>
+    <div class="status" id="status">正在取得 LINE 使用者資料...</div>
   </div>
 
-  <div class="container">
-`;
-
-    if (menu.length === 0) {
-      html += `<div class="empty">目前沒有菜單資料</div>`;
-    } else {
-      menu.forEach(item => {
-        html += `
-    <div class="card">
-      <div class="store">${item.store || ''}</div>
-      <div class="item">${item.item || ''}</div>
-      <div class="price">$${item.price || 0}</div>
-      <button onclick="addOrder('${item.store || ''}', '${item.item || ''}', '${item.price || 0}')">
-        加入訂單
-      </button>
-    </div>
-`;
-      });
-    }
-
-    html += `
-  </div>
+  <div class="container" id="menu"></div>
 
 <script>
+const menu = ${menuJson};
+const LIFF_ID = '2010025093-yATK02dc';
+
 let profile = null;
+let liffReady = false;
+
+function renderMenu() {
+  const menuBox = document.getElementById('menu');
+
+  if (!menu || menu.length === 0) {
+    menuBox.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
+    return;
+  }
+
+  menuBox.innerHTML = menu.map((m, index) => {
+    return \`
+      <div class="card">
+        <div class="store">\${m.store || ''}</div>
+        <div class="item">\${m.item || ''}</div>
+        <div class="price">$\${m.price || 0}</div>
+        <button id="btn-\${index}" onclick="addOrder(\${index})" disabled>
+          載入中...
+        </button>
+      </div>
+    \`;
+  }).join('');
+}
+
+function setButtonsReady() {
+  menu.forEach((_, index) => {
+    const btn = document.getElementById('btn-' + index);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '加入訂單';
+    }
+  });
+}
 
 async function initLIFF() {
   try {
-    await liff.init({
-      liffId: '2010025093-yATK02dc'
-    });
+    await liff.init({ liffId: LIFF_ID });
 
     if (!liff.isLoggedIn()) {
       liff.login();
@@ -428,27 +449,37 @@ async function initLIFF() {
     }
 
     profile = await liff.getProfile();
-    console.log(profile);
+    liffReady = true;
+
+    document.getElementById('status').innerText =
+      '已登入：' + (profile.displayName || '');
+
+    setButtonsReady();
+
   } catch (err) {
+    document.getElementById('status').innerText =
+      'LIFF 取得失敗，請重新整理';
     alert('LIFF 初始化失敗：' + err.message);
   }
 }
 
-async function addOrder(store, item, price) {
-  if (!profile) {
+async function addOrder(index) {
+  if (!liffReady || !profile) {
     alert('尚未取得 LINE 使用者資料，請重新整理頁面');
     return;
   }
 
+  const item = menu[index];
+
   const orderData = {
     name: profile.displayName || '',
     userId: profile.userId || '',
-    store: store,
-    item: item,
+    store: item.store || '',
+    item: item.item || '',
     spec: '',
     note: '',
     qty: 1,
-    price: price
+    price: item.price || 0
   };
 
   try {
@@ -472,6 +503,7 @@ async function addOrder(store, item, price) {
   }
 }
 
+renderMenu();
 initLIFF();
 </script>
 
