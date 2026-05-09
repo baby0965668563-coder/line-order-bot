@@ -21,7 +21,8 @@ const knownUsers = {};
 
 // 管理員名單，只放妳跟之後管理員的 userId
 const admins = [
-  "U8d9c82446aa9eb90d7de001cfc7ea90f"
+  "U8d9c82446aa9eb90d7de001cfc7ea90f",
+  "Ubcfae64b443b9fad21bbc584e991b306" 
 ];
 
 function isAdmin(userId) {
