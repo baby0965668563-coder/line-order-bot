@@ -5,19 +5,21 @@ const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
-app.use(express.json());
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
 
+app.use('/webhook', line.middleware(config));
+app.use(express.json());
+
 const client = new line.Client(config);
+
 const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 let isOpen = false;
 let allText = '';
-const knownUsers = {};
 
 const admins = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f",
@@ -31,74 +33,22 @@ function isAdmin(userId) {
 }
 
 async function authSheet() {
+
   await doc.useServiceAccountAuth({
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
     private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
   });
+
   await doc.loadInfo();
+
 }
 
-async function loadOptions() {
-  await authSheet();
-
-  const groupSheet = doc.sheetsByTitle['OptionGroups'];
-  const optionSheet = doc.sheetsByTitle['Options'];
-
-  if (!groupSheet || !optionSheet) {
-    return {};
-  }
-
-  const groupRows = await groupSheet.getRows();
-  const optionRows = await optionSheet.getRows();
-
-  const result = {};
-
-  groupRows.forEach(g => {
-    const key =
-      String(g['店家']).trim() +
-      '||' +
-      String(g['品項']).trim();
-
-    if (!result[key]) {
-      result[key] = [];
-    }
-
-    result[key].push({
-      category: String(g['分類']).trim(),
-      required: String(g['必選']).trim() === 'TRUE',
-      min: Number(g['最少'] || 0),
-      max: Number(g['最多'] || 0),
-      options: []
-    });
-  });
-
-  optionRows.forEach(o => {
-    const key =
-      String(o['店家']).trim() +
-      '||' +
-      String(o['品項']).trim();
-
-    if (!result[key]) return;
-
-    const cat = String(o['分類']).trim();
-
-    const target = result[key].find(
-      x => x.category === cat
-    );
-
-    if (target) {
-      target.options.push(
-        String(o['選項']).trim()
-      );
-    }
-  });
-
-  return result;
-}
 async function loadMenu() {
+
   await authSheet();
 
   const sheet = doc.sheetsByTitle['Menu'];
+
   if (!sheet) return [];
 
   const rows = await sheet.getRows();
@@ -114,492 +64,472 @@ async function loadMenu() {
       row.item &&
       row.price > 0
     );
+
 }
 
-async function saveUserToSheet(profileName, userId, sourceType, groupId) {
-  try {
-    await authSheet();
+async function loadOptions() {
 
-    const sheet = doc.sheetsByTitle['Users'];
-    if (!sheet) return;
+  await authSheet();
 
-    await sheet.addRow({
-      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      LINE名稱: profileName,
-      userId: userId,
-      來源類型: sourceType,
-      群組ID: groupId || '',
-      權限: isAdmin(userId) ? 'admin' : 'user'
+  const groupsSheet =
+    doc.sheetsByTitle['OptionGroups'];
+
+  const optionsSheet =
+    doc.sheetsByTitle['Options'];
+
+  if (!groupsSheet || !optionsSheet) {
+    return {};
+  }
+
+  const groupRows =
+    await groupsSheet.getRows();
+
+  const optionRows =
+    await optionsSheet.getRows();
+
+  const result = {};
+
+  groupRows.forEach(group => {
+
+    const store =
+      String(group['店家'] || '').trim();
+
+    const item =
+      String(group['品項'] || '').trim();
+
+    const category =
+      String(group['分類'] || '').trim();
+
+    const min =
+      Number(group['最少'] || 0);
+
+    const max =
+      Number(group['最多'] || 0);
+
+    const key = store + '||' + item;
+
+    if (!result[key]) {
+      result[key] = [];
+    }
+
+    const options = optionRows
+      .filter(opt =>
+        String(opt['店家']).trim() === store &&
+        String(opt['品項']).trim() === item &&
+        String(opt['分類']).trim() === category
+      )
+      .map(opt =>
+        String(opt['選項']).trim()
+      );
+
+    result[key].push({
+      category,
+      min,
+      max,
+      options
     });
 
-    console.log('已寫入 Users');
-  } catch (err) {
-    console.error('寫入 Users 失敗：', err.message);
-  }
+  });
+
+  return result;
+
 }
 
 async function saveOrderToSheet(order) {
+
   try {
+
     await authSheet();
 
-    const sheet = doc.sheetsByTitle['Orders'];
-    if (!sheet) {
-      console.error('找不到 Orders 分頁');
-      return false;
-    }
+    const sheet =
+      doc.sheetsByTitle['Orders'];
 
-    const qty = Number(order.qty || 1);
-    const price = Number(order.price || 0);
+    if (!sheet) return false;
+
+    const qty =
+      Number(order.qty || 1);
+
+    const price =
+      Number(order.price || 0);
 
     await sheet.addRow({
-      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      LINE名稱: order.name || '',
-      userId: order.userId || '',
-      店家: order.store || '',
-      品項: order.item || '',
-      規格: order.spec || '',
-      備註: order.note || '',
-      數量: qty,
-      單價: price,
-      總價: price * qty,
-      狀態: '未付款'
+
+      時間:
+        new Date().toLocaleString(
+          'zh-TW',
+          { timeZone: 'Asia/Taipei' }
+        ),
+
+      LINE名稱:
+        order.name || '',
+
+      userId:
+        order.userId || '',
+
+      店家:
+        order.store || '',
+
+      品項:
+        order.item || '',
+
+      規格:
+        order.spec || '',
+
+      備註:
+        order.note || '',
+
+      數量:
+        qty,
+
+      單價:
+        price,
+
+      總價:
+        qty * price,
+
+      狀態:
+        '未付款'
+
     });
 
-    console.log('已寫入 Orders');
     return true;
+
   } catch (err) {
-    console.error('寫入 Orders 失敗：', err.message);
+
+    console.error(err);
+
     return false;
-  }
-}
 
-function clean(text) {
-  return String(text || '')
-    .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
-    .trim();
-}
-
-function parseOrders(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-  let currentItem = '';
-  let currentPrice = 0;
-  let pendingOrder = null;
-  let itemBuffer = '';
-  let priceMap = {};
-
-  const itemCount = {};
-  const userTotal = {};
-
-  function cleanItemName(text) {
-    return clean(text).replace(/\d+顆/g, '');
   }
 
-  function add(item, price, name, qty = 1, note = '') {
-    item = cleanItemName(item);
-    name = clean(name);
-
-    if (!item || !name || !qty) return;
-
-    const finalItem = note ? `${item}（${note}）` : item;
-    itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
-    userTotal[name] = (userTotal[name] || 0) + price * qty;
-  }
-
-  function getPrice(rawQty) {
-    if (priceMap[rawQty] !== undefined) return priceMap[rawQty];
-    if (rawQty === '半' && priceMap['0.5'] !== undefined) return priceMap['0.5'];
-    return currentPrice;
-  }
-
-  for (let line of lines) {
-    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
-
-    const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (priceTable) {
-      priceMap[priceTable[1]] = Number(priceTable[2]);
-      continue;
-    }
-
-    if (pendingOrder && !/[+*]/.test(line) && !/\d/.test(line)) {
-      add(pendingOrder.item, pendingOrder.price, line, 1);
-      pendingOrder = null;
-      continue;
-    }
-
-    const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)(.*)$/);
-    if (orderMatch && currentItem) {
-      const name = orderMatch[1];
-      const rawQty = orderMatch[2];
-      const extra = orderMatch[3] || '';
-      const note = extra.includes('辣') ? '辣' : '';
-      const price = getPrice(rawQty);
-      const qty = rawQty === '半' || rawQty === '0.5' ? 1 : Number(rawQty);
-
-      add(currentItem, price, name, qty, note);
-      continue;
-    }
-
-    const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
-    if (inlineSymbol) {
-      add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (itemSymbol) {
-      currentItem = itemSymbol[1];
-      currentPrice = Number(itemSymbol[2]);
-      itemBuffer = '';
-      continue;
-    }
-
-    const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
-    if (inlineNoSymbol && !/[+*]/.test(line)) {
-      add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
-    if (noSymbolNoName && !/[+*]/.test(line) && !/顆/.test(line)) {
-      pendingOrder = {
-        item: noSymbolNoName[1],
-        price: Number(noSymbolNoName[2])
-      };
-      itemBuffer = '';
-      continue;
-    }
-
-    const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
-    if (priceNameOnly && itemBuffer) {
-      add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const priceOnly = line.match(/^(\d{2,5})$/);
-    if (priceOnly && itemBuffer) {
-      pendingOrder = {
-        item: itemBuffer,
-        price: Number(priceOnly[1])
-      };
-      itemBuffer = '';
-      continue;
-    }
-
-    if (!/[+*]/.test(line)) {
-      if (/顆/.test(line)) {
-        currentItem = line;
-        currentPrice = 0;
-        itemBuffer = line;
-        continue;
-      }
-
-      if (currentItem) {
-        add(currentItem, currentPrice, line, 1);
-        continue;
-      }
-
-      currentItem = line;
-      currentPrice = 0;
-      itemBuffer = line;
-      continue;
-    }
-  }
-
-  return { itemCount, userTotal };
-}
-
-function formatResult(itemCount, userTotal) {
-  let text = '📊 訂餐統計\n\n';
-
-  text += '【品項數量】\n';
-  for (let item in itemCount) {
-    if (itemCount[item] > 0) {
-      text += `${item} x${itemCount[item]}\n`;
-    }
-  }
-
-  text += '\n【個人金額】\n';
-  for (let user in userTotal) {
-    text += `${user}：$${userTotal[user]}\n`;
-  }
-
-  const total = Object.values(userTotal).reduce((a, b) => a + b, 0);
-  text += `\n💰 總金額：$${total}`;
-
-  return text;
-}
-
-function formatShopOrder(itemCount, userTotal) {
-  let orderText = '您好，今天訂購如下：\n\n';
-  let totalCount = 0;
-
-  for (let item in itemCount) {
-    const qty = itemCount[item];
-
-    if (qty > 0) {
-      orderText += `${item} x${qty}\n`;
-      totalCount += qty;
-    }
-  }
-
-  const totalMoney = Object.values(userTotal).reduce((a, b) => a + b, 0);
-
-  orderText += `\n總數：${totalCount}份`;
-  orderText += `\n總金額：${totalMoney}元`;
-  orderText += '\n\n麻煩您，謝謝～';
-
-  return orderText;
 }
 
 app.get('/', (req, res) => {
-  res.send('LINE 訂餐統計機器人運作中');
+  res.send('LINE 訂餐系統運作中');
 });
 
 app.get('/order', async (req, res) => {
-  try {
-    const menu = await loadMenu();
-const optionData = await loadOptions();
-    const menuJson = JSON.stringify(menu).replace(/</g, '\\u003c');
-    const optionJson = JSON.stringify(optionData).replace(/</g, '\\u003c');
 
-    const html = `
+  try {
+
+    const menu =
+      await loadMenu();
+
+    const optionData =
+      await loadOptions();
+
+    const menuJson =
+      JSON.stringify(menu).replace(/</g, '\\u003c');
+
+    const optionJson =
+      JSON.stringify(optionData).replace(/</g, '\\u003c');
+
+    res.send(`
+
 <!DOCTYPE html>
 <html>
+
 <head>
-  <meta charset="utf-8">
-  <title>訂餐小幫手</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, "Microsoft JhengHei", sans-serif;
-      background: #f6f3ee;
-      color: #333;
-    }
 
-    .header {
-      padding: 20px;
-      background: #fff;
-      border-bottom: 1px solid #eee;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
+<meta charset="utf-8">
 
-    .header h2 {
-      margin: 0;
-      font-size: 24px;
-    }
+<title>訂餐小幫手</title>
 
-    .header p {
-      margin: 8px 0 0;
-      color: #777;
-      font-size: 15px;
-    }
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1"
+/>
 
-    .status {
-      margin-top: 10px;
-      font-size: 14px;
-      color: #06c755;
-    }
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
-    .container {
-      padding: 16px;
-    }
+<style>
 
-    .card {
-      background: #fff;
-      border-radius: 16px;
-      padding: 16px;
-      margin-bottom: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
+body{
+  margin:0;
+  background:#f6f3ee;
+  font-family:Arial;
+}
 
-    .store {
-      font-size: 13px;
-      color: #999;
-      margin-bottom: 6px;
-    }
+.header{
+  background:white;
+  padding:20px;
+  position:sticky;
+  top:0;
+  z-index:10;
+}
 
-    .item {
-      font-size: 20px;
-      font-weight: bold;
-      margin-bottom: 8px;
-    }
+.container{
+  padding:16px;
+}
 
-    .price {
-      font-size: 17px;
-      margin-bottom: 12px;
-    }
+.card{
+  background:white;
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:14px;
+}
 
-    button {
-      width: 100%;
-      padding: 13px;
-      border: none;
-      border-radius: 999px;
-      background: #06c755;
-      color: white;
-      font-size: 16px;
-      font-weight: bold;
-    }
+.store{
+  color:#999;
+  font-size:13px;
+}
 
-    button:disabled {
-      background: #aaa;
-    }
+.item{
+  font-size:24px;
+  font-weight:bold;
+  margin-top:8px;
+}
 
-    .empty {
-      text-align: center;
-      color: #999;
-      margin-top: 60px;
-    }
-  </style>
-</head>
+.price{
+  font-size:18px;
+  margin-top:10px;
+}
 
-<body>
-  <div class="header">
-    <h2>訂餐小幫手</h2>
-    <p>請選擇今天要訂的餐點</p>
-    <div class="status" id="status">正在取得 LINE 使用者資料...</div>
-  </div>
+button{
+  width:100%;
+  border:none;
+  background:#06c755;
+  color:white;
+  padding:14px;
+  border-radius:999px;
+  font-size:16px;
+  margin-top:14px;
+}
 
-  <div class="container" id="menu"></div>
-  <div id="optionModal" style="
+.modal{
   display:none;
   position:fixed;
   inset:0;
   background:rgba(0,0,0,0.5);
   z-index:999;
-">
+}
 
-  <div style="
-    background:white;
-    border-radius:20px;
-    padding:20px;
-    width:90%;
-    max-width:400px;
-    margin:50px auto;
-  ">
+.modal-box{
+  background:white;
+  width:90%;
+  max-width:420px;
+  margin:50px auto;
+  border-radius:20px;
+  padding:20px;
+}
 
-    <h3 id="modalTitle"></h3>
+.option-label{
+  display:block;
+  margin:10px 0;
+}
 
-    <div id="modalOptions"></div>
+</style>
 
-    <button onclick="submitOptions()">
-      確認加入
-    </button>
+</head>
 
-  </div>
+<body>
+
+<div class="header">
+
+<h1>訂餐小幫手</h1>
+
+<p>請選擇今天要訂的餐點</p>
+
+<div id="status">
+正在取得 LINE 使用者資料...
+</div>
+
+</div>
+
+<div
+  class="container"
+  id="menu"
+></div>
+
+<div
+  class="modal"
+  id="optionModal"
+>
+
+<div class="modal-box">
+
+<h2 id="modalTitle"></h2>
+
+<div id="modalOptions"></div>
+
+<button onclick="submitOptions()">
+確認加入
+</button>
+
+</div>
 
 </div>
 
 <script>
+
 const menu = ${menuJson};
+
 const optionData = ${optionJson};
 
-const visibleMenu = menu.filter(m =>
-  m.store &&
-  m.item &&
-  Number(m.price) > 0
-);
-
-const LIFF_ID = '2010025093-yATK02dc';
+const LIFF_ID =
+'2010025093-yATK02dc';
 
 let profile = null;
+
 let liffReady = false;
+
 let currentItem = null;
+
 let currentGroups = [];
 
-function renderMenu() {
-  const menuBox = document.getElementById('menu');
-
-  if (!visibleMenu || visibleMenu.length === 0) {
-    menuBox.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
-    return;
-  }
-
-  menuBox.innerHTML = visibleMenu.map((m, index) => {
-    return \`
-      <div class="card">
-        <div class="store">\${m.store || ''}</div>
-        <div class="item">\${m.item || ''}</div>
-        <div class="price">$\${m.price || 0}</div>
-        <button id="btn-\${index}" onclick="addOrder(\${index})" disabled>
-          載入中...
-        </button>
-      </div>
-    \`;
-  }).join('');
-}
-
-function setButtonsReady() {
-  visibleMenu.forEach((_, index) => {
-    const btn = document.getElementById('btn-' + index);
-    if (btn) {
-      btn.disabled = false;
-      btn.innerText = '加入訂單';
-    }
-  });
-}
-
-async function initLIFF() {
-  try {
-    await liff.init({ liffId: LIFF_ID });
-
-    if (!liff.isLoggedIn()) {
-      liff.login();
-      return;
-    }
-
-    profile = await liff.getProfile();
-    liffReady = true;
-
-    document.getElementById('status').innerText =
-      '已登入：' + (profile.displayName || '');
-
-    setButtonsReady();
-
-  } catch (err) {
-    document.getElementById('status').innerText =
-      'LIFF 取得失敗，請重新整理';
-    alert('LIFF 初始化失敗：' + err.message);
-  }
-}
-
-async function addOrder(index) {
-
-  if (!liffReady || !profile) {
-    alert('尚未取得 LINE 使用者資料');
-    return;
-  }
-
-  currentItem = visibleMenu[index];
-
-  const key =
-    currentItem.store + '||' + currentItem.item;
-
-  currentGroups = optionData[key] || [];
-
-  if (currentGroups.length === 0) {
-    submitFinalOrder('');
-    return;
-  }
-
-  document.getElementById('modalTitle').innerText =
-    currentItem.item;
+function renderMenu(){
 
   const box =
-    document.getElementById('modalOptions');
+    document.getElementById('menu');
 
-  box.innerHTML = '';
+  box.innerHTML =
+    menu.map((m,index)=>{
 
-  currentGroups.forEach((group, groupIndex) => {
+      return \`
 
-    const title = document.createElement('div');
+<div class="card">
+
+<div class="store">
+\${m.store}
+</div>
+
+<div class="item">
+\${m.item}
+</div>
+
+<div class="price">
+$\${m.price}
+</div>
+
+<button
+  onclick="addOrder(\${index})"
+  id="btn-\${index}"
+  disabled
+>
+載入中...
+</button>
+
+</div>
+
+\`;
+
+}).join('');
+
+}
+
+function enableButtons(){
+
+  menu.forEach((_,index)=>{
+
+    const btn =
+      document.getElementById(
+        'btn-'+index
+      );
+
+    if(btn){
+
+      btn.disabled = false;
+
+      btn.innerText =
+        '加入訂單';
+
+    }
+
+  });
+
+}
+
+async function initLIFF(){
+
+  try{
+
+    await liff.init({
+      liffId: LIFF_ID
+    });
+
+    if(!liff.isLoggedIn()){
+
+      liff.login();
+
+      return;
+
+    }
+
+    profile =
+      await liff.getProfile();
+
+    liffReady = true;
+
+    document.getElementById(
+      'status'
+    ).innerText =
+      '已登入：' +
+      profile.displayName;
+
+    enableButtons();
+
+  }catch(err){
+
+    console.error(err);
+
+    document.getElementById(
+      'status'
+    ).innerText =
+      'LIFF 初始化失敗';
+
+  }
+
+}
+
+async function addOrder(index){
+
+  if(!liffReady){
+
+    alert('LIFF 尚未完成');
+
+    return;
+
+  }
+
+  currentItem =
+    menu[index];
+
+  const key =
+    currentItem.store +
+    '||' +
+    currentItem.item;
+
+  currentGroups =
+    optionData[key] || [];
+
+  if(currentGroups.length === 0){
+
+    submitFinalOrder('');
+
+    return;
+
+  }
+
+  document.getElementById(
+    'modalTitle'
+  ).innerText =
+    currentItem.item;
+
+  const optionBox =
+    document.getElementById(
+      'modalOptions'
+    );
+
+  optionBox.innerHTML = '';
+
+  currentGroups.forEach(
+    (group,groupIndex)=>{
+
+    const title =
+      document.createElement('div');
+
+    title.style.marginTop =
+      '16px';
 
     title.innerHTML =
       '<b>' +
@@ -611,110 +541,60 @@ async function addOrder(index) {
       group.max +
       ' 個';
 
-    title.style.marginTop = '10px';
+    optionBox.appendChild(title);
 
-    box.appendChild(title);
-
-    group.options.forEach(opt => {
-
-      const id =
-        'g' + groupIndex + '_' + opt;
+    group.options.forEach(opt=>{
 
       const label =
         document.createElement('label');
 
-      label.style.display = 'block';
-      label.style.margin = '8px 0';
+      label.className =
+        'option-label';
 
       label.innerHTML = \`
-        <input
-          type="checkbox"
-          value="\${opt}"
-          data-group="\${groupIndex}"
-        >
-        \${opt}
-      \`;
+<input
+  type="checkbox"
+  value="\${opt}"
+  data-group="\${groupIndex}"
+>
+\${opt}
+\`;
 
-      box.appendChild(label);
+      optionBox.appendChild(label);
 
     });
 
   });
 
-  document.getElementById('optionModal').style.display =
-    'block';
+  document.getElementById(
+    'optionModal'
+  ).style.display = 'block';
+
 }
 
-      alert(
-        '請選擇 ' +
-        group.min +
-        ' ~ ' +
-        group.max +
-        ' 個'
-      );
-    }
-
-    specText +=
-      group.category +
-      '：' +
-      selected.join('、') +
-      ' ';
-  }
-
-  const orderData = {
-    name: profile.displayName || '',
-    userId: profile.userId || '',
-    store: item.store || '',
-    item: item.item || '',
-    spec: specText.trim(),
-    note: '',
-    qty: 1,
-    price: item.price || 0
-  };
-
-  try {
-
-    const res = await fetch('/api/order', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(orderData)
-    });
-
-    const result = await res.json();
-
-    if (result.success) {
-      alert('已加入訂單');
-    } else {
-      alert('加入失敗');
-    }
-
-  } catch (err) {
-
-    alert('送出失敗：' + err.message);
-
-  }
-}
-
-async function submitOptions() {
+async function submitOptions(){
 
   let specText = '';
 
-  for (let i = 0; i < currentGroups.length; i++) {
+  for(
+    let i=0;
+    i<currentGroups.length;
+    i++
+  ){
 
-    const group = currentGroups[i];
+    const group =
+      currentGroups[i];
 
     const checked = [
       ...document.querySelectorAll(
-        'input[data-group="' + i + '"]:checked'
+        'input[data-group="'+i+'"]:checked'
       )
     ];
 
-    if (
+    if(
       checked.length < group.min ||
       checked.length > group.max
-    ) {
+    ){
 
       alert(
         group.category +
@@ -726,244 +606,248 @@ async function submitOptions() {
       );
 
       return;
+
     }
 
     const values =
-      checked.map(x => x.value);
+      checked.map(x=>x.value);
 
     specText +=
       group.category +
       '：' +
       values.join('、') +
       ' ';
+
   }
 
-  document.getElementById('optionModal').style.display =
-    'none';
+  document.getElementById(
+    'optionModal'
+  ).style.display = 'none';
 
-  submitFinalOrder(specText.trim());
+  submitFinalOrder(
+    specText.trim()
+  );
+
 }
 
-async function submitFinalOrder(specText) {
+async function submitFinalOrder(specText){
 
   const orderData = {
-    name: profile.displayName || '',
-    userId: profile.userId || '',
-    store: currentItem.store || '',
-    item: currentItem.item || '',
-    spec: specText || '',
-    note: '',
-    qty: 1,
-    price: currentItem.price || 0
+
+    name:
+      profile.displayName || '',
+
+    userId:
+      profile.userId || '',
+
+    store:
+      currentItem.store || '',
+
+    item:
+      currentItem.item || '',
+
+    spec:
+      specText || '',
+
+    note:'',
+
+    qty:1,
+
+    price:
+      currentItem.price || 0
+
   };
 
-  try {
+  try{
 
-    const res = await fetch('/api/order', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
+    const res =
+      await fetch('/api/order',{
+
+      method:'POST',
+
+      headers:{
+        'Content-Type':
+        'application/json'
       },
-      body: JSON.stringify(orderData)
+
+      body:
+        JSON.stringify(orderData)
+
     });
 
-    const result = await res.json();
+    const result =
+      await res.json();
 
-    if (result.success) {
+    if(result.success){
+
       alert('已加入訂單');
-    } else {
+
+    }else{
+
       alert('加入失敗');
+
     }
 
-  } catch (err) {
+  }catch(err){
 
-    alert('送出失敗：' + err.message);
+    alert(
+      '送出失敗：' +
+      err.message
+    );
 
   }
+
 }
+
 renderMenu();
+
 initLIFF();
+
 </script>
 
 </body>
 </html>
-`;
 
-    res.send(html);
+`);
+
   } catch (err) {
-    console.error('載入訂餐頁失敗：', err.message);
-    res.send('載入訂餐頁失敗，請稍後再試');
+
+    console.error(err);
+
+    res.send('載入訂餐頁失敗');
+
   }
+
 });
 
 app.post('/api/order', async (req, res) => {
-  console.log('收到訂單');
-  console.log(req.body);
 
-  const success = await saveOrderToSheet(req.body);
+  const success =
+    await saveOrderToSheet(req.body);
 
-  if (success) {
-    res.json({ success: true });
-  } else {
-    res.status(500).json({ success: false });
-  }
+  res.json({
+    success
+  });
+
 });
 
-app.post('/webhook', line.middleware(config), async (req, res) => {
-  try {
-    const event = req.body.events[0];
+app.post('/webhook', async (req, res) => {
 
-    if (!event || event.type !== 'message') {
+  try {
+
+    const event =
+      req.body.events?.[0];
+
+    if (!event) {
       return res.sendStatus(200);
     }
 
-    console.log("來源類型：", event.source.type);
-    console.log("使用者ID：", event.source.userId);
-    console.log("群組ID：", event.source.groupId || "不是群組");
-
-    let profileName = "未知使用者";
-
-    try {
-      if (event.source.type === "group") {
-        const profile = await client.getGroupMemberProfile(
-          event.source.groupId,
-          event.source.userId
-        );
-        profileName = profile.displayName;
-      } else {
-        const profile = await client.getProfile(event.source.userId);
-        profileName = profile.displayName;
-      }
-    } catch (err) {
-      console.error("取得使用者名稱失敗：", err.message);
+    if (event.type !== 'message') {
+      return res.sendStatus(200);
     }
 
-    console.log("LINE名稱：", profileName);
+    const userId =
+      event.source.userId;
 
-    knownUsers[profileName] = event.source.userId;
-    console.log("已記錄使用者：", knownUsers);
+    const text =
+      event.message.text || '';
 
-    await saveUserToSheet(
-      profileName,
-      event.source.userId,
-      event.source.type,
-      event.source.groupId || ''
-    );
+    if (
+      text === '開單'
+    ) {
 
-    const userId = event.source.userId;
-
-    const text = event.message.text
-      ? event.message.text.trim()
-      : '[非文字訊息]';
-
-    if (text === '開單') {
       if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以開單'
-        });
-        return res.sendStatus(200);
-      }
 
-      if (isOpen) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '目前已開單中，不會清空訂單'
-        });
+        await client.replyMessage(
+          event.replyToken,
+          {
+            type: 'text',
+            text: '只有管理員可以開單'
+          }
+        );
+
         return res.sendStatus(200);
+
       }
 
       isOpen = true;
-      allText = '';
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '已開單，可以開始點餐'
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (text === '清空') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以清空'
-        });
-        return res.sendStatus(200);
-      }
 
       allText = '';
-      isOpen = false;
 
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '已清空訂單'
-      });
+      await client.replyMessage(
+        event.replyToken,
+        {
+          type: 'text',
+          text: '已開單'
+        }
+      );
 
       return res.sendStatus(200);
+
     }
 
-    if (text === '店家單') {
+    if (
+      text === '清空'
+    ) {
+
       if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以查看店家單'
-        });
+
+        await client.replyMessage(
+          event.replyToken,
+          {
+            type: 'text',
+            text: '只有管理員可以清空'
+          }
+        );
+
         return res.sendStatus(200);
+
       }
-
-      const result = parseOrders(allText);
-      const reply = formatShopOrder(result.itemCount, result.userTotal);
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: reply
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (text === '結單' || text === '收單' || text === '統計') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以結單 / 統計'
-        });
-        return res.sendStatus(200);
-      }
-
-      const result = parseOrders(allText);
-      const reply = formatResult(result.itemCount, result.userTotal);
 
       isOpen = false;
 
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: reply
-      });
+      allText = '';
+
+      await client.replyMessage(
+        event.replyToken,
+        {
+          type: 'text',
+          text: '已清空'
+        }
+      );
 
       return res.sendStatus(200);
+
     }
 
-    if (isOpen && event.message.type === 'text') {
+    if (
+      isOpen &&
+      event.message.type === 'text'
+    ) {
+
       allText += '\n' + text;
+
     }
 
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('Webhook error:', error);
-    return res.sendStatus(200);
+    res.sendStatus(200);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.sendStatus(200);
+
   }
+
 });
 
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.sendStatus(200);
-});
-
-const PORT = process.env.PORT || 3000;
+const PORT =
+  process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log('Server running on ' + PORT);
+
+  console.log(
+    'Server running on ' + PORT
+  );
+
 });
