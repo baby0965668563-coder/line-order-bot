@@ -551,15 +551,14 @@ group.options.forEach(opt=>{
   label.className =
     'option-label';
 
-  label.innerHTML = `
-<input
-  type="checkbox"
-  value="${opt}"
-  data-group="${i}"
-  onchange="limitCheck(${i}, ${group.max})"
->
-${opt}
-`;
+ label.innerHTML =
+  '<input ' +
+  'type="checkbox" ' +
+  'value="' + opt + '" ' +
+  'data-group="' + i + '" ' +
+  'onchange="limitCheck(' + i + ',' + group.max + ')"' +
+  '> ' +
+  opt;
 
   optionBox.appendChild(label);
 
