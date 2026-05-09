@@ -416,6 +416,37 @@ app.get('/order', async (req, res) => {
 
     html += `
   </div>
+<script>
+async function addOrder(store, item, price) {
+
+  const orderData = {
+    name: '測試使用者',
+    userId: 'test-user',
+    store: store,
+    item: item,
+    spec: '',
+    note: '',
+    qty: 1,
+    price: price
+  };
+
+  const res = await fetch('/api/order', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(orderData)
+  });
+
+  const result = await res.json();
+
+  if (result.success) {
+    alert('已加入訂單');
+  } else {
+    alert('加入失敗');
+  }
+}
+</script>
 </body>
 </html>
 `;
