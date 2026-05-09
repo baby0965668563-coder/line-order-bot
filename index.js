@@ -488,7 +488,11 @@ initLIFF();
 });
 
 app.post('/api/order', async (req, res) => {
-  app.get('/api/my-orders', async (req, res) => {
+  app.post('/api/order', async (req, res) => {
+  console.log('收到訂單API');
+  console.log(req.body);
+
+  const success = await saveOrderToSheet(req.body);
 
   try {
 
