@@ -403,38 +403,22 @@ let currentGroups = [];
 
 function renderMenu(){
 
-  const box =
-    document.getElementById('menu');
-    const tabsBox =
-  document.getElementById('storeTabs');
-
-const stores =
-  [...new Set(menu.map(m => m.store))];
-
-tabsBox.innerHTML =
-  stores.map(store =>
-
-    '<button ' +
-    'style="' +
-      'width:auto;' +
-      'margin:4px;' +
-      'padding:10px 14px;' +
-      'border-radius:999px;' +
-    '" ' +
-    'onclick="scrollToStore(\'' + store + '\')"' +
-    '>' +
-      store +
-    '</button>'
-
-  ).join('');
+  const box = document.getElementById('menu');
+  const tabsBox = document.getElementById('storeTabs');
 
   if(!menu.length){
-
-    box.innerHTML =
-      '<div class="empty">目前沒有菜單資料</div>';
-
+    box.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
     return;
   }
+
+  const stores = [...new Set(menu.map(m => m.store))];
+
+  tabsBox.innerHTML = stores.map((store, i) =>
+    '<button ' +
+    'style="width:auto;margin:4px;padding:10px 14px;border-radius:999px;" ' +
+    'onclick="scrollToStore(' + i + ')"' +
+    '>' + store + '</button>'
+  ).join('');
 
   let html = '';
   let currentStore = '';
@@ -442,14 +426,11 @@ tabsBox.innerHTML =
   menu.forEach((m,index)=>{
 
     if(m.store !== currentStore){
-
       currentStore = m.store;
-
-html +=
-  '<div id="store-' + currentStore + '"></div>';
+      const storeIndex = stores.indexOf(currentStore);
 
       html +=
-        '<div style="' +
+        '<div id="store-' + storeIndex + '" style="' +
         'font-size:22px;' +
         'font-weight:bold;' +
         'margin:24px 0 12px;' +
@@ -461,33 +442,17 @@ html +=
 
     html +=
       '<div class="card">' +
-
-        '<div class="store">' +
-          m.store +
-        '</div>' +
-
-        '<div class="item">' +
-          m.item +
-        '</div>' +
-
-        '<div class="price">$' +
-          m.price +
-        '</div>' +
-
-        '<button ' +
-          'onclick="addOrder(' + index + ')" ' +
-          'id="btn-' + index + '" ' +
-          'disabled' +
-        '>' +
+        '<div class="store">' + m.store + '</div>' +
+        '<div class="item">' + m.item + '</div>' +
+        '<div class="price">$' + m.price + '</div>' +
+        '<button onclick="addOrder(' + index + ')" id="btn-' + index + '" disabled>' +
           '載入中...' +
         '</button>' +
-
       '</div>';
 
   });
 
   box.innerHTML = html;
-
 }
 
 function enableButtons(){
