@@ -812,6 +812,22 @@ async function submitFinalOrder(specText){
 
 }
 
+function scrollToStore(store){
+
+  const el =
+    document.getElementById(
+      'store-' + store
+    );
+
+  if(el){
+
+    el.scrollIntoView({
+      behavior:'smooth'
+    });
+
+  }
+
+}
 renderMenu();
 
 initLIFF();
