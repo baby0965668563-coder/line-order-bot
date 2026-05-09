@@ -40,16 +40,23 @@ async function authSheet() {
 
 async function loadMenu() {
   await authSheet();
+
   const sheet = doc.sheetsByTitle['Menu'];
   if (!sheet) return [];
 
   const rows = await sheet.getRows();
 
-  return rows.map(r => ({
-    store: r['店家'] || '',
-    item: r['品項'] || '',
-    price: r['價格'] || 0
-  }));
+  return rows
+    .map(r => ({
+      store: r['店家'] || '',
+      item: r['品項'] || '',
+      price: Number(r['價格']) || 0
+    }))
+    .filter(item =>
+      item.store &&
+      item.item &&
+      Number(item.price) > 0
+    );
 }
 
 async function saveUserToSheet(profileName, userId, sourceType, groupId) {
