@@ -12,7 +12,6 @@ const config = {
 };
 
 const client = new line.Client(config);
-
 const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 let isOpen = false;
@@ -20,9 +19,14 @@ let allText = '';
 
 const knownUsers = {};
 
-const allowedUsers = [
+// 管理員名單，只放妳跟之後管理員的 userId
+const admins = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f"
 ];
+
+function isAdmin(userId) {
+  return admins.includes(userId);
+}
 
 async function saveUserToSheet(profileName, userId, sourceType, groupId) {
   try {
@@ -46,7 +50,7 @@ async function saveUserToSheet(profileName, userId, sourceType, groupId) {
       userId: userId,
       來源類型: sourceType,
       群組ID: groupId || '',
-      權限: 'user'
+      權限: isAdmin(userId) ? 'admin' : 'user'
     });
 
     console.log('已寫入 Google 試算表');
@@ -259,20 +263,19 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
 
     const userId = event.source.userId;
 
-    if (!allowedUsers.includes(userId)) {
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '你目前沒有使用權限'
-      });
-
-      return res.sendStatus(200);
-    }
-
     const text = event.message.text
       ? event.message.text.trim()
       : '[非文字訊息]';
 
     if (text === '開單') {
+      if (!isAdmin(userId)) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '只有管理員可以開單'
+        });
+        return res.sendStatus(200);
+      }
+
       if (isOpen) {
         await client.replyMessage(event.replyToken, {
           type: 'text',
@@ -293,6 +296,14 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     }
 
     if (text === '清空') {
+      if (!isAdmin(userId)) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '只有管理員可以清空'
+        });
+        return res.sendStatus(200);
+      }
+
       allText = '';
       isOpen = false;
 
@@ -305,6 +316,14 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     }
 
     if (text === '結單' || text === '收單' || text === '統計') {
+      if (!isAdmin(userId)) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '只有管理員可以結單 / 統計'
+        });
+        return res.sendStatus(200);
+      }
+
       const result = parseOrders(allText);
       const reply = formatResult(result.itemCount, result.userTotal);
 
@@ -318,6 +337,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // 群組所有人都可以點餐，但只有開單後才記錄文字
     if (isOpen && event.message.type === 'text') {
       allText += '\n' + text;
     }
