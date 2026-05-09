@@ -543,27 +543,27 @@ async function addOrder(index){
 
     optionBox.appendChild(title);
 
-    group.options.forEach(opt=>{
+group.options.forEach(opt=>{
 
-      const label =
-        document.createElement('label');
+  const label =
+    document.createElement('label');
 
-      label.className =
-        'option-label';
+  label.className =
+    'option-label';
 
-      label.innerHTML = \`
+  label.innerHTML = `
 <input
   type="checkbox"
-  onchange="limitCheck(${groupIndex}, ${group.max})"
-  value="\${opt}"
-  data-group="\${groupIndex}"
+  value="${opt}"
+  data-group="${i}"
+  onchange="limitCheck(${i}, ${group.max})"
 >
-\${opt}
-\`;
+${opt}
+`;
 
-      optionBox.appendChild(label);
+  optionBox.appendChild(label);
 
-    });
+});
 
   });
 
