@@ -523,11 +523,18 @@ async function addOrder(index){
 
   if(currentGroups.length === 0){
 
-    submitFinalOrder('');
+  document.getElementById('modalTitle').innerText =
+    currentItem.item;
 
-    return;
+  document.getElementById('modalOptions').innerHTML =
+    '<div style="color:#777;">此商品無需選擇規格</div>';
 
-  }
+  document.getElementById('optionModal').style.display =
+    'block';
+
+  return;
+
+}
 
   document.getElementById(
     'modalTitle'
