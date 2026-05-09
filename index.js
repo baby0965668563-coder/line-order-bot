@@ -407,38 +407,64 @@ function renderMenu(){
   const box =
     document.getElementById('menu');
 
-  box.innerHTML =
-    menu.map((m,index)=>{
+  if(!menu.length){
 
-      return \`
+    box.innerHTML =
+      '<div class="empty">目前沒有菜單資料</div>';
 
-<div class="card">
+    return;
+  }
 
-<div class="store">
-\${m.store}
-</div>
+  let html = '';
+  let currentStore = '';
 
-<div class="item">
-\${m.item}
-</div>
+  menu.forEach((m,index)=>{
 
-<div class="price">
-$\${m.price}
-</div>
+    if(m.store !== currentStore){
 
-<button
-  onclick="addOrder(\${index})"
-  id="btn-\${index}"
-  disabled
->
-載入中...
-</button>
+      currentStore = m.store;
 
-</div>
+      html += `
+        <div style="
+          font-size:22px;
+          font-weight:bold;
+          margin:24px 0 12px;
+          padding:10px 4px;
+        ">
+          ${currentStore}
+        </div>
+      `;
+    }
 
-\`;
+    html += `
+      <div class="card">
 
-}).join('');
+        <div class="store">
+          ${m.store}
+        </div>
+
+        <div class="item">
+          ${m.item}
+        </div>
+
+        <div class="price">
+          $${m.price}
+        </div>
+
+        <button
+          onclick="addOrder(${index})"
+          id="btn-${index}"
+          disabled
+        >
+          載入中...
+        </button>
+
+      </div>
+    `;
+
+  });
+
+  box.innerHTML = html;
 
 }
 
