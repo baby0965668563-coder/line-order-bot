@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const line = require('@line/bot-sdk');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
 
@@ -12,13 +13,47 @@ const config = {
 
 const client = new line.Client(config);
 
+const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
+
 let isOpen = false;
 let allText = '';
 
 const knownUsers = {};
+
 const allowedUsers = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f"
 ];
+
+async function saveUserToSheet(profileName, userId, sourceType, groupId) {
+  try {
+    await doc.useServiceAccountAuth({
+      client_email: process.env.GOOGLE_CLIENT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    });
+
+    await doc.loadInfo();
+
+    const sheet = doc.sheetsByTitle['Users'];
+
+    if (!sheet) {
+      console.error('找不到 Users 分頁');
+      return;
+    }
+
+    await sheet.addRow({
+      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
+      LINE名稱: profileName,
+      userId: userId,
+      來源類型: sourceType,
+      群組ID: groupId || '',
+      權限: 'user'
+    });
+
+    console.log('已寫入 Google 試算表');
+  } catch (err) {
+    console.error('寫入 Google 試算表失敗：', err.message);
+  }
+}
 
 function clean(text) {
   return String(text || '')
@@ -185,54 +220,57 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
 
-   if (!event || event.type !== 'message') {
-     const text = event.message.text
-  ? event.message.text.trim()
-  : '[非文字訊息]';
+    if (!event || event.type !== 'message') {
       return res.sendStatus(200);
     }
-console.log("來源類型：", event.source.type);
-console.log("使用者ID：", event.source.userId);
-console.log("群組ID：", event.source.groupId || "不是群組");
 
-if (!event || event.type !== 'message' || event.message.type !== 'text') {
-  return res.sendStatus(200);
-}
+    console.log("來源類型：", event.source.type);
+    console.log("使用者ID：", event.source.userId);
+    console.log("群組ID：", event.source.groupId || "不是群組");
+
     let profileName = "未知使用者";
 
-try {
-  if (event.source.type === "group") {
-    const profile = await client.getGroupMemberProfile(
-      event.source.groupId,
-      event.source.userId
+    try {
+      if (event.source.type === "group") {
+        const profile = await client.getGroupMemberProfile(
+          event.source.groupId,
+          event.source.userId
+        );
+        profileName = profile.displayName;
+      } else {
+        const profile = await client.getProfile(event.source.userId);
+        profileName = profile.displayName;
+      }
+    } catch (err) {
+      console.error("取得使用者名稱失敗：", err.message);
+    }
+
+    console.log("LINE名稱：", profileName);
+
+    knownUsers[profileName] = event.source.userId;
+    console.log("已記錄使用者：", knownUsers);
+
+    await saveUserToSheet(
+      profileName,
+      event.source.userId,
+      event.source.type,
+      event.source.groupId || ''
     );
-    profileName = profile.displayName;
-  } else {
-    const profile = await client.getProfile(event.source.userId);
-    profileName = profile.displayName;
-  }
-} catch (err) {
-  console.error("取得使用者名稱失敗：", err.message);
-}
 
-console.log("LINE名稱：", profileName);
+    const userId = event.source.userId;
 
-knownUsers[profileName] = event.source.userId;
+    if (!allowedUsers.includes(userId)) {
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '你目前沒有使用權限'
+      });
 
-console.log("已記錄使用者：", knownUsers);
+      return res.sendStatus(200);
+    }
 
-const userId = event.source.userId;
-
-if (!allowedUsers.includes(userId)) {
-  await client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: '你目前沒有使用權限'
-  });
-
-  return res.sendStatus(200);
-}
-
-const text = event.message.text.trim();
+    const text = event.message.text
+      ? event.message.text.trim()
+      : '[非文字訊息]';
 
     if (text === '開單') {
       if (isOpen) {
@@ -280,7 +318,7 @@ const text = event.message.text.trim();
       return res.sendStatus(200);
     }
 
-    if (isOpen) {
+    if (isOpen && event.message.type === 'text') {
       allText += '\n' + text;
     }
 
