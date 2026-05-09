@@ -511,6 +511,8 @@ const LIFF_ID = '2010025093-yATK02dc';
 
 let profile = null;
 let liffReady = false;
+let currentItem = null;
+let currentGroups = [];
 
 function renderMenu() {
   const menuBox = document.getElementById('menu');
