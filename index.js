@@ -703,7 +703,7 @@ async function submitFinalOrder(specText){
 
     note:'',
 
-    qty:1,
+    qty: Number(document.getElementById('qtySelect').value || 1),
 
     price:
       currentItem.price || 0
