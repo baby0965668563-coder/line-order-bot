@@ -554,6 +554,7 @@ async function addOrder(index){
       label.innerHTML = \`
 <input
   type="checkbox"
+  onchange="limitCheck(${groupIndex}, ${group.max})"
   value="\${opt}"
   data-group="\${groupIndex}"
 >
