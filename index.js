@@ -458,6 +458,15 @@ async function addOrder(store, item, price) {
   }
 });
 
+app.post('/api/order', async (req, res) => {
+  const success = await saveOrderToSheet(req.body);
+
+  if (success) {
+    res.json({ success: true });
+  } else {
+    res.status(500).json({ success: false });
+  }
+});
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
