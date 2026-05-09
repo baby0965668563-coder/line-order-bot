@@ -462,6 +462,7 @@ userId: profile?.userId || '',
     body: JSON.stringify(orderData)
   });
 
+  console.log(res);
   const result = await res.json();
 
   if (result.success) {
