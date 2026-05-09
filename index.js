@@ -5,7 +5,8 @@ const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
-app.use('/api', express.json());
+
+app.use(express.json());
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -13,20 +14,8 @@ const config = {
 };
 
 const client = new line.Client(config);
+
 const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
-
-let isOpen = false;
-let allText = '';
-
-const knownUsers = {};
-
-const admins = [
-  "U8d9c82446aa9eb90d7de001cfc7ea90f"
-];
-
-function isAdmin(userId) {
-  return admins.includes(userId);
-}
 
 async function authSheet() {
   await doc.useServiceAccountAuth({
@@ -38,16 +27,14 @@ async function authSheet() {
 }
 
 async function loadMenu() {
+
   await authSheet();
 
-  const menuSheet = doc.sheetsByTitle['Menu'];
+  const sheet = doc.sheetsByTitle['Menu'];
 
-  if (!menuSheet) {
-    console.error('找不到 Menu 分頁');
-    return [];
-  }
+  if (!sheet) return [];
 
-  const rows = await menuSheet.getRows();
+  const rows = await sheet.getRows();
 
   return rows.map(r => ({
     store: r['店家'],
@@ -56,44 +43,23 @@ async function loadMenu() {
   }));
 }
 
-async function saveUserToSheet(profileName, userId, sourceType, groupId) {
-  try {
-    await authSheet();
-
-    const sheet = doc.sheetsByTitle['Users'];
-
-    if (!sheet) {
-      console.error('找不到 Users 分頁');
-      return;
-    }
-
-    await sheet.addRow({
-      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
-      LINE名稱: profileName,
-      userId: userId,
-      來源類型: sourceType,
-      群組ID: groupId || '',
-      權限: isAdmin(userId) ? 'admin' : 'user'
-    });
-
-    console.log('已寫入 Google 試算表');
-  } catch (err) {
-    console.error('寫入 Google 試算表失敗：', err.message);
-  }
-}
 async function saveOrderToSheet(order) {
+
   try {
+
     await authSheet();
 
     const sheet = doc.sheetsByTitle['Orders'];
 
     if (!sheet) {
-      console.error('找不到 Orders 分頁');
+      console.log('找不到 Orders');
       return false;
     }
 
     await sheet.addRow({
-      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
+      時間: new Date().toLocaleString('zh-TW', {
+        timeZone: 'Asia/Taipei'
+      }),
       LINE名稱: order.name || '',
       userId: order.userId || '',
       店家: order.store || '',
@@ -106,329 +72,137 @@ async function saveOrderToSheet(order) {
       狀態: '未付款'
     });
 
-    console.log('已寫入 Orders');
+    console.log('成功寫入 Orders');
+
     return true;
+
   } catch (err) {
-    console.error('寫入 Orders 失敗：', err.message);
+
+    console.log(err);
+
     return false;
   }
 }
 
-function clean(text) {
-  return String(text || '')
-    .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
-    .trim();
-}
-
-function parseOrders(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-  let currentItem = '';
-  let currentPrice = 0;
-  let pendingOrder = null;
-  let itemBuffer = '';
-  let priceMap = {};
-
-  const itemCount = {};
-  const userTotal = {};
-
-  function cleanItemName(text) {
-    return clean(text).replace(/\d+顆/g, '');
-  }
-
-  function add(item, price, name, qty = 1, note = '') {
-    item = cleanItemName(item);
-    name = clean(name);
-
-    if (!item || !name || !qty) return;
-
-    const finalItem = note ? `${item}（${note}）` : item;
-
-    itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
-    userTotal[name] = (userTotal[name] || 0) + price * qty;
-  }
-
-  function getPrice(rawQty) {
-    if (priceMap[rawQty] !== undefined) return priceMap[rawQty];
-    if (rawQty === '半' && priceMap['0.5'] !== undefined) return priceMap['0.5'];
-    return currentPrice;
-  }
-
-  for (let line of lines) {
-    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
-
-    const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (priceTable) {
-      priceMap[priceTable[1]] = Number(priceTable[2]);
-      continue;
-    }
-
-    if (pendingOrder && !/[+*]/.test(line) && !/\d/.test(line)) {
-      add(pendingOrder.item, pendingOrder.price, line, 1);
-      pendingOrder = null;
-      continue;
-    }
-
-    const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)(.*)$/);
-    if (orderMatch && currentItem) {
-      const name = orderMatch[1];
-      const rawQty = orderMatch[2];
-      const extra = orderMatch[3] || '';
-      const note = extra.includes('辣') ? '辣' : '';
-      const price = getPrice(rawQty);
-      const qty = rawQty === '半' || rawQty === '0.5' ? 1 : Number(rawQty);
-
-      add(currentItem, price, name, qty, note);
-      continue;
-    }
-
-    const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
-    if (inlineSymbol) {
-      add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (itemSymbol) {
-      currentItem = itemSymbol[1];
-      currentPrice = Number(itemSymbol[2]);
-      itemBuffer = '';
-      continue;
-    }
-
-    const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
-    if (inlineNoSymbol && !/[+*]/.test(line)) {
-      add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
-    if (noSymbolNoName && !/[+*]/.test(line) && !/顆/.test(line)) {
-      pendingOrder = {
-        item: noSymbolNoName[1],
-        price: Number(noSymbolNoName[2])
-      };
-      itemBuffer = '';
-      continue;
-    }
-
-    const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
-    if (priceNameOnly && itemBuffer) {
-      add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const priceOnly = line.match(/^(\d{2,5})$/);
-    if (priceOnly && itemBuffer) {
-      pendingOrder = {
-        item: itemBuffer,
-        price: Number(priceOnly[1])
-      };
-      itemBuffer = '';
-      continue;
-    }
-
-    if (!/[+*]/.test(line)) {
-      if (/顆/.test(line)) {
-        currentItem = line;
-        currentPrice = 0;
-        itemBuffer = line;
-        continue;
-      }
-
-      if (currentItem) {
-        add(currentItem, currentPrice, line, 1);
-        continue;
-      }
-
-      currentItem = line;
-      currentPrice = 0;
-      itemBuffer = line;
-      continue;
-    }
-  }
-
-  return { itemCount, userTotal };
-}
-
-function formatResult(itemCount, userTotal) {
-  let text = '📊 訂餐統計\n\n';
-
-  text += '【品項數量】\n';
-  for (let item in itemCount) {
-    if (itemCount[item] > 0) {
-      text += `${item} x${itemCount[item]}\n`;
-    }
-  }
-
-  text += '\n【個人金額】\n';
-  for (let user in userTotal) {
-    text += `${user}：$${userTotal[user]}\n`;
-  }
-
-  const total = Object.values(userTotal).reduce((a, b) => a + b, 0);
-  text += `\n💰 總金額：$${total}`;
-
-  return text;
-}
-
-function formatShopOrder(itemCount, userTotal) {
-  let orderText = '您好，今天訂購如下：\n\n';
-  let totalCount = 0;
-
-  for (let item in itemCount) {
-    const qty = itemCount[item];
-
-    if (qty > 0) {
-      orderText += `${item} x${qty}\n`;
-      totalCount += qty;
-    }
-  }
-
-  const totalMoney = Object.values(userTotal).reduce((a, b) => a + b, 0);
-
-  orderText += `\n總數：${totalCount}份`;
-  orderText += `\n總金額：${totalMoney}元`;
-  orderText += '\n\n麻煩您，謝謝～';
-
-  return orderText;
-}
+app.get('/', (req, res) => {
+  res.send('LINE 訂餐機器人運作中');
+});
 
 app.get('/order', async (req, res) => {
-  try {
-    const menu = await loadMenu();
 
-    let html = `
+  const menu = await loadMenu();
+
+  let html = `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>訂餐小幫手</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, "Microsoft JhengHei", sans-serif;
-      background: #f6f3ee;
-      color: #333;
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>訂餐小幫手</title>
 
-    .header {
-      padding: 20px;
-      background: #ffffff;
-      border-bottom: 1px solid #eee;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-
-    .header h2 {
-      margin: 0;
-      font-size: 22px;
-    }
-
-    .header p {
-      margin: 6px 0 0;
-      color: #777;
-      font-size: 14px;
-    }
-
-    .container {
-      padding: 16px;
-    }
-
-    .card {
-      background: #fff;
-      border-radius: 16px;
-      padding: 16px;
-      margin-bottom: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    }
-
-    .store {
-      font-size: 13px;
-      color: #999;
-      margin-bottom: 6px;
-    }
-
-    .item {
-      font-size: 18px;
-      font-weight: bold;
-      margin-bottom: 8px;
-    }
-
-    .price {
-      font-size: 16px;
-      margin-bottom: 12px;
-      color: #444;
-    }
-
-    button {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 999px;
-      background: #06c755;
-      color: white;
-      font-size: 16px;
-      font-weight: bold;
-    }
-
-    .empty {
-      text-align: center;
-      color: #999;
-      margin-top: 60px;
-    }
-  </style>
-</head>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+<style>
+
+body{
+  margin:0;
+  background:#f6f3ee;
+  font-family:Arial;
+}
+
+.header{
+  padding:20px;
+  background:white;
+}
+
+.container{
+  padding:16px;
+}
+
+.card{
+  background:white;
+  border-radius:16px;
+  padding:16px;
+  margin-bottom:12px;
+}
+
+.store{
+  color:#999;
+  font-size:13px;
+}
+
+.item{
+  font-size:20px;
+  font-weight:bold;
+  margin-top:6px;
+}
+
+.price{
+  margin-top:8px;
+  font-size:18px;
+}
+
+button{
+  margin-top:12px;
+  width:100%;
+  border:none;
+  border-radius:999px;
+  padding:12px;
+  background:#06c755;
+  color:white;
+  font-size:16px;
+}
+
+</style>
+
+</head>
+
 <body>
-  <div class="header">
-    <h2>訂餐小幫手</h2>
-    <p>請選擇今天要訂的餐點</p>
-  </div>
 
-  <div class="container">
+<div class="header">
+<h2>訂餐小幫手</h2>
+</div>
+
+<div class="container">
 `;
 
-    if (menu.length === 0) {
-      html += `<div class="empty">目前沒有菜單資料</div>`;
-    } else {
-      menu.forEach(item => {
-        html += `
-    <div class="card">
-      <div class="store">${item.store || ''}</div>
-      <div class="item">${item.item || ''}</div>
-      <div class="price">$${item.price || 0}</div>
-      <button onclick="addOrder(
-  '${item.store}',
-  '${item.item}',
-  '${item.price}'
-)">
-  加入訂單
-</button>
-    </div>
-`;
-      });
-    }
+  menu.forEach(item => {
 
     html += `
-  </div>
-<script>
+<div class="card">
+
+<div class="store">${item.store}</div>
+
+<div class="item">${item.item}</div>
+
+<div class="price">$${item.price}</div>
+
+<button onclick="addOrder(
+'${item.store}',
+'${item.item}',
+'${item.price}'
+)">
+加入訂單
+</button>
+
+</div>
+`;
+  });
+
+  html += `
+</div>
+
 <script>
 
 let profile = null;
 
-async function initLIFF() {
+async function initLIFF(){
 
   await liff.init({
-    liffId: '2010025093-yATK02dc'
+    liffId:'2010025093-yATK02dc'
   });
 
-  if (!liff.isLoggedIn()) {
+  if(!liff.isLoggedIn()){
     liff.login();
     return;
   }
@@ -437,52 +211,14 @@ async function initLIFF() {
 
   console.log(profile);
 }
-async function addOrder(store, item, price) {
 
-  alert('按鈕有反應，準備送出');
+async function addOrder(store,item,price){
 
-  const orderData = {
-    name: '測試使用者',
-    userId: 'test-user',
-    store: store,
-    item: item,
-    spec: '',
-    note: '',
-    qty: 1,
-    price: price
-  };
-
-  try {
-    const res = await fetch('https://line-order-bot-fomq.onrender.com/api/order', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(orderData)
-    });
-
-    alert('API狀態：' + res.status);
-
-    const result = await res.json();
-
-    if (result.success) {
-      alert('已加入訂單');
-    } else {
-      alert('加入失敗');
-    }
-
-  } catch (err) {
-    alert('送出失敗：' + err.message);
-  }
-}
-
-  console.log('點擊加入訂單');
   alert('按鈕有反應');
 
   const orderData = {
-  const orderData = {
     name: profile?.displayName || '',
-userId: profile?.userId || '',
+    userId: profile?.userId || '',
     store: store,
     item: item,
     spec: '',
@@ -491,251 +227,65 @@ userId: profile?.userId || '',
     price: price
   };
 
- const res = await fetch('/api/order', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify(orderData)
-});
+  try{
 
-console.log(res);
+    const res = await fetch('/api/order',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json'
+      },
+      body:JSON.stringify(orderData)
+    });
 
-const result = await res.json();
+    const result = await res.json();
 
-console.log(result);
+    console.log(result);
 
-if (result.success) {
-    alert('已加入訂單');
-  } else {
-    alert('加入失敗');
+    if(result.success){
+      alert('已加入訂單');
+    }else{
+      alert('加入失敗');
+    }
+
+  }catch(err){
+
+    alert('錯誤：'+err.message);
+
   }
 }
+
 initLIFF();
+
 </script>
+
 </body>
 </html>
 `;
 
-    res.send(html);
-  } catch (err) {
-    console.error('載入訂餐頁失敗：', err.message);
-    res.send('載入訂餐頁失敗，請稍後再試');
-  }
+  res.send(html);
 });
 
-async (req, res) => {
 app.post('/api/order', async (req, res) => {
-  console.log('收到訂單API');
+
+  console.log('收到訂單');
+
   console.log(req.body);
 
   const success = await saveOrderToSheet(req.body);
 
-  if (success) {
-    res.json({ success: true });
-  } else {
-    res.status(500).json({ success: false });
+  if(success){
+
+    res.json({
+      success:true
+    });
+
+  }else{
+
+    res.status(500).json({
+      success:false
+    });
+
   }
-});
-
-  try {
-
-    await authSheet();
-
-    const userId = req.query.userId;
-
-    const sheet = doc.sheetsByTitle['Orders'];
-
-    const rows = await sheet.getRows();
-
-    const myOrders = rows
-      .filter(r => r['userId'] === userId)
-      .map(r => ({
-        store: r['店家'],
-        item: r['品項'],
-        spec: r['規格'],
-        note: r['備註'],
-        qty: r['數量'],
-        total: r['總價']
-      }));
-
-    res.json(myOrders);
-
-  } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json([]);
-  }
-
-  app.post('/api/order', async (req, res) => {
-  console.log('收到訂單API');
-  console.log(req.body);
-
-  const success = await saveOrderToSheet(req.body);
-
-  if (success) {
-    res.json({ success: true });
-  } else {
-    res.status(500).json({ success: false });
-  }
-});
-
-app.post('/webhook', line.middleware(config), async (req, res) => {
-  try {
-    const event = req.body.events[0];
-
-    if (!event || event.type !== 'message') {
-      return res.sendStatus(200);
-    }
-
-    console.log("來源類型：", event.source.type);
-    console.log("使用者ID：", event.source.userId);
-    console.log("群組ID：", event.source.groupId || "不是群組");
-
-    let profileName = "未知使用者";
-
-    try {
-      if (event.source.type === "group") {
-        const profile = await client.getGroupMemberProfile(
-          event.source.groupId,
-          event.source.userId
-        );
-        profileName = profile.displayName;
-      } else {
-        const profile = await client.getProfile(event.source.userId);
-        profileName = profile.displayName;
-      }
-    } catch (err) {
-      console.error("取得使用者名稱失敗：", err.message);
-    }
-
-    console.log("LINE名稱：", profileName);
-
-    knownUsers[profileName] = event.source.userId;
-    console.log("已記錄使用者：", knownUsers);
-
-    await saveUserToSheet(
-      profileName,
-      event.source.userId,
-      event.source.type,
-      event.source.groupId || ''
-    );
-
-    const userId = event.source.userId;
-
-    const text = event.message.text
-      ? event.message.text.trim()
-      : '[非文字訊息]';
-
-    if (text === '開單') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以開單'
-        });
-        return res.sendStatus(200);
-      }
-
-      if (isOpen) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '目前已開單中，不會清空訂單'
-        });
-        return res.sendStatus(200);
-      }
-
-      isOpen = true;
-      allText = '';
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '已開單，可以開始點餐'
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (text === '清空') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以清空'
-        });
-        return res.sendStatus(200);
-      }
-
-      allText = '';
-      isOpen = false;
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '已清空訂單'
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (text === '店家單') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以查看店家單'
-        });
-        return res.sendStatus(200);
-      }
-
-      const result = parseOrders(allText);
-      const reply = formatShopOrder(result.itemCount, result.userTotal);
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: reply
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (text === '結單' || text === '收單' || text === '統計') {
-      if (!isAdmin(userId)) {
-        await client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: '只有管理員可以結單 / 統計'
-        });
-        return res.sendStatus(200);
-      }
-
-      const result = parseOrders(allText);
-      const reply = formatResult(result.itemCount, result.userTotal);
-
-      isOpen = false;
-
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: reply
-      });
-
-      return res.sendStatus(200);
-    }
-
-    if (isOpen && event.message.type === 'text') {
-      allText += '\n' + text;
-    }
-
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error('Webhook error:', error);
-    return res.sendStatus(200);
-  }
-});
-
-app.get('/', (req, res) => {
-  res.send('LINE 訂餐統計機器人運作中');
-});
-
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.sendStatus(200);
 });
 
 const PORT = process.env.PORT || 3000;
