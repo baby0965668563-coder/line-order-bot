@@ -454,18 +454,21 @@ userId: profile?.userId || '',
     price: price
   };
 
-  const res = await fetch('/api/order', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(orderData)
-  });
+ const res = await fetch('/api/order', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(orderData)
+});
 
-  console.log(res);
-  const result = await res.json();
+console.log(res);
 
-  if (result.success) {
+const result = await res.json();
+
+console.log(result);
+
+if (result.success) {
     alert('已加入訂單');
   } else {
     alert('加入失敗');
