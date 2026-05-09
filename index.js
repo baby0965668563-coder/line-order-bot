@@ -48,14 +48,14 @@ async function loadMenu() {
 
   return rows
     .map(r => ({
-      store: r['店家'] || '',
-      item: r['品項'] || '',
-      price: Number(r['價格']) || 0
+      store: String(r['店家'] || '').trim(),
+      item: String(r['品項'] || '').trim(),
+      price: Number(r['價格'] || 0)
     }))
-    .filter(item =>
-      item.store &&
-      item.item &&
-      Number(item.price) > 0
+    .filter(row =>
+      row.store &&
+      row.item &&
+      row.price > 0
     );
 }
 
@@ -91,6 +91,9 @@ async function saveOrderToSheet(order) {
       return false;
     }
 
+    const qty = Number(order.qty || 1);
+    const price = Number(order.price || 0);
+
     await sheet.addRow({
       時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
       LINE名稱: order.name || '',
@@ -99,9 +102,9 @@ async function saveOrderToSheet(order) {
       品項: order.item || '',
       規格: order.spec || '',
       備註: order.note || '',
-      數量: order.qty || 1,
-      單價: order.price || 0,
-      總價: Number(order.price || 0) * Number(order.qty || 1),
+      數量: qty,
+      單價: price,
+      總價: price * qty,
       狀態: '未付款'
     });
 
