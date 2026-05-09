@@ -404,7 +404,15 @@ let currentGroups = [];
 function renderMenu(){
 
   const box = document.getElementById('menu');
-  const tabsBox = document.getElementById('storeTabs');
+
+let tabsBox = document.getElementById('storeTabs');
+
+if (!tabsBox) {
+  tabsBox = document.createElement('div');
+  tabsBox.id = 'storeTabs';
+  tabsBox.className = 'container';
+  box.parentNode.insertBefore(tabsBox, box);
+}
 
   if(!menu.length){
     box.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
