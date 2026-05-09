@@ -577,43 +577,73 @@ async function addOrder(index) {
     return;
   }
 
-  const item = visibleMenu[index];
+  currentItem = visibleMenu[index];
 
   const key =
-    item.store + '||' + item.item;
+    currentItem.store + '||' + currentItem.item;
 
-  const groups = optionData[key] || [];
+  currentGroups = optionData[key] || [];
 
-  let specText = '';
+  if (currentGroups.length === 0) {
+    submitFinalOrder('');
+    return;
+  }
 
-  for (const group of groups) {
+  document.getElementById('modalTitle').innerText =
+    currentItem.item;
 
-    let selected = [];
+  const box =
+    document.getElementById('modalOptions');
 
-    while (true) {
+  box.innerHTML = '';
 
-      const input = prompt(
-        '【' + group.category + '】\\n' +
-        '請選 ' + group.min + ' ~ ' + group.max + ' 個\\n\\n' +
-        group.options.join('\\n')
-      );
+  currentGroups.forEach((group, groupIndex) => {
 
-      if (!input) {
-        alert('已取消');
-        return;
-      }
+    const title = document.createElement('div');
 
-      selected = input
-        .split(',')
-        .map(x => x.trim())
-        .filter(Boolean);
+    title.innerHTML =
+      '<b>' +
+      group.category +
+      '</b><br>' +
+      '請選 ' +
+      group.min +
+      ' ~ ' +
+      group.max +
+      ' 個';
 
-      if (
-        selected.length >= group.min &&
-        selected.length <= group.max
-      ) {
-        break;
-      }
+    title.style.marginTop = '10px';
+
+    box.appendChild(title);
+
+    group.options.forEach(opt => {
+
+      const id =
+        'g' + groupIndex + '_' + opt;
+
+      const label =
+        document.createElement('label');
+
+      label.style.display = 'block';
+      label.style.margin = '8px 0';
+
+      label.innerHTML = \`
+        <input
+          type="checkbox"
+          value="\${opt}"
+          data-group="\${groupIndex}"
+        >
+        \${opt}
+      \`;
+
+      box.appendChild(label);
+
+    });
+
+  });
+
+  document.getElementById('optionModal').style.display =
+    'block';
+}
 
       alert(
         '請選擇 ' +
