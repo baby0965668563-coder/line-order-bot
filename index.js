@@ -14,6 +14,9 @@ const client = new line.Client(config);
 
 let isOpen = false;
 let allText = '';
+const allowedUsers = [
+  "U8d9c82446aa9eb90d7de001cfc7ea90f"
+];
 
 function clean(text) {
   return String(text || '')
@@ -184,7 +187,23 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 console.log("使用者ID：", event.source.userId);
-    const text = event.message.text.trim();
+
+if (!event || event.type !== 'message' || event.message.type !== 'text') {
+  return res.sendStatus(200);
+}
+
+const userId = event.source.userId;
+
+if (!allowedUsers.includes(userId)) {
+  await client.replyMessage(event.replyToken, {
+    type: 'text',
+    text: '你目前沒有使用權限'
+  });
+
+  return res.sendStatus(200);
+}
+
+const text = event.message.text.trim();
 
     if (text === '開單') {
       if (isOpen) {
