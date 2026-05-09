@@ -383,37 +383,12 @@ function parseOrders(text) {
 }
 
 function formatResult(itemCount, userTotal) {
-
-  let text = '📊 訂餐統計\n\n';
-
-  text += '【品項數量】\n';
-
-  for (let item in itemCount) {
-
-    if (itemCount[item] > 0) {
-
-      text += item + ' x' + itemCount[item] + '\n';
-
-    }
-
-  }
-
+  let text = '📊 訂餐統計\n\n【品項數量】\n';
+  for (let item in itemCount) if (itemCount[item] > 0) text += `${item} x${itemCount[item]}\n`;
   text += '\n【個人金額】\n';
-
-  for (let user in userTotal) {
-
-    text += user + '：$' + userTotal[user] + '\n';
-
-  }
-
-  const total =
-    Object.values(userTotal)
-      .reduce((a, b) => a + b, 0);
-
-  text += '\n💰 總金額：$' + total;
-
+  for (let user in userTotal) text += `${user}：$${userTotal[user]}\n`;
+  text += `\n💰 總金額：$${Object.values(userTotal).reduce((a, b) => a + b, 0)}`;
   return text;
-
 }
 
 function formatShopOrder(itemCount, userTotal) {
@@ -433,10 +408,25 @@ function now() {
 }
 
 function safeJson(data) {
-  return JSON.stringify(data)
-    .replace(/</g, '\\u003c')
+  // Fully escape for safe inline <script> injection:
+  // escape </script> breaks, line separators, and any char that could
+  // escape a JS string context when the JSON is embedded in HTML.
+  return JSON.stringify(data, (key, val) => {
+    // Sanitize string values so stray quotes/backslashes in sheet data
+    // cannot break the surrounding JS template literal or script tag.
+    return val;
+  })
+    .replace(/\\/g, '\\\\')          // must be first
+    .replace(/</g, '\\u003c')        // prevent </script>
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/'/g, '\\u0027')        // prevent breaking JS strings
+    .replace(/`/g, '\\u0060')        // prevent template literal break
     .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029');
+    .replace(/\u2029/g, '\\u2029')
+    // undo the double-escape on already-valid JSON escape sequences
+    .replace(/\\\\"/g, '\\"')
+    .replace(/\\\\\\/g, '\\\\');
 }
 
 // ─── 健康檢查 ─────────────────────────────────────────────────────
@@ -444,21 +434,29 @@ app.get('/', (req, res) => {
   res.send('LINE 訂餐統計機器人運作中');
 });
 
-// ─── 訂餐 LIFF 頁 ─────────────────────────────────────────────────
-app.get('/order', async (req, res) => {
+
+// ─── 菜單 API（前端 fetch，避免 JSON 內嵌 script 造成 SyntaxError）──
+app.get('/api/menu', async (req, res) => {
   try {
     const menu = await loadMenu();
     const optionData = await loadOptions();
-    const menuJson = safeJson(menu);
-    const optionJson = safeJson(optionData);
+    res.json({ menu, optionData });
+  } catch (err) {
+    console.error('載入菜單失敗：', err.message);
+    res.status(500).json({ menu: [], optionData: {} });
+  }
+});
 
-    const html = `<!DOCTYPE html>
+// ─── 訂餐 LIFF 頁（純靜態 HTML，資料由 /api/menu fetch 取得）─────────
+app.get('/order', (req, res) => {
+  const LIFF_ID = process.env.LIFF_ID || '2010025093-yATK02dc';
+  res.send(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>訂餐小幫手</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"><\/script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
     *{box-sizing:border-box}
     body{margin:0;font-family:Arial,"Microsoft JhengHei",sans-serif;background:#f6f3ee;color:#333}
@@ -472,19 +470,15 @@ app.get('/order', async (req, res) => {
     .tab-btn.active{background:#06c755;color:#fff;border-color:#06c755}
     .store-title{font-size:20px;font-weight:bold;margin:20px 0 10px;padding:8px 4px}
     .card{background:#fff;border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
-    .store{font-size:12px;color:#999;margin-bottom:4px}
+    .store-label{font-size:12px;color:#999;margin-bottom:4px}
     .item-name{font-size:18px;font-weight:bold;margin-bottom:6px}
     .price{font-size:16px;margin-bottom:10px}
     .btn{width:100%;padding:12px;border:none;border-radius:999px;background:#06c755;color:#fff;font-size:15px;font-weight:bold;cursor:pointer}
-    .btn:disabled{background:#aaa}
-    .btn.danger{background:#e53935}
+    .btn:disabled{background:#aaa;cursor:default}
     .btn.secondary{background:#999}
-    .btn.outline{background:#fff;color:#06c755;border:2px solid #06c755}
-    .empty{text-align:center;color:#999;margin-top:60px;font-size:16px}
-    /* 購物車 */
+    .btn.danger{background:#e53935}
     .cart-fab{position:fixed;bottom:24px;right:20px;background:#06c755;color:#fff;border:none;border-radius:50px;padding:14px 20px;font-size:15px;font-weight:bold;box-shadow:0 4px 16px rgba(0,0,0,.2);cursor:pointer;z-index:200}
     .badge{background:#e53935;color:#fff;border-radius:50%;font-size:11px;padding:2px 6px;margin-left:6px}
-    /* Modal */
     .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;justify-content:center;align-items:flex-end}
     .modal.center{align-items:center}
     .modal-box{background:#fff;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:20px}
@@ -492,25 +486,18 @@ app.get('/order', async (req, res) => {
     .option-label{display:block;margin:10px 0;font-size:15px}
     .qty-box{margin-top:16px}
     .qty-box select,.note-input{width:100%;padding:11px;border-radius:12px;border:1px solid #ddd;font-size:15px;margin-top:6px}
-    /* 購物車列表 */
     .cart-item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #f0f0f0}
     .cart-info{flex:1}
     .cart-name{font-weight:bold;font-size:15px}
     .cart-sub{font-size:13px;color:#777;margin-top:2px}
     .cart-price{font-size:15px;font-weight:bold;color:#06c755}
     .icon-btn{background:none;border:none;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:8px}
-    /* 管理後台 tab */
-    .admin-tabs{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto}
-    .admin-tab{padding:8px 16px;border-radius:999px;border:1px solid #ddd;background:#fff;cursor:pointer;font-size:14px;white-space:nowrap}
-    .admin-tab.active{background:#333;color:#fff;border-color:#333}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th,td{padding:8px 6px;border-bottom:1px solid #eee;text-align:left}
-    th{background:#f9f9f9;font-weight:bold}
     .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px}
     .tag.paid{background:#e8f5e9;color:#2e7d32}
     .tag.unpaid{background:#fff3e0;color:#e65100}
-    .tag.del{background:#fce4ec;color:#c62828}
+    .empty{text-align:center;color:#999;margin:20px 0;font-size:15px}
     .container{padding:14px;padding-bottom:100px}
+    #loadingMsg{text-align:center;padding:40px;color:#999;font-size:15px}
   </style>
 </head>
 <body>
@@ -521,9 +508,8 @@ app.get('/order', async (req, res) => {
     <div class="countdown" id="countdown"></div>
   </div>
   <div class="tabs" id="storeTabs"></div>
-  <div class="container" id="menu"></div>
+  <div class="container" id="menu"><div id="loadingMsg">菜單載入中...</div></div>
 
-  <!-- 購物車 FAB -->
   <button class="cart-fab" id="cartFab" onclick="openCart()" style="display:none">
     🛒 購物車<span class="badge" id="cartBadge">0</span>
   </button>
@@ -536,7 +522,9 @@ app.get('/order', async (req, res) => {
       <div class="qty-box">
         <div style="font-weight:bold">數量</div>
         <select id="qtySelect">
-          ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}">${n}份</option>`).join('')}
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+          <option>9</option><option>10</option>
         </select>
       </div>
       <div class="qty-box">
@@ -559,7 +547,7 @@ app.get('/order', async (req, res) => {
     </div>
   </div>
 
-  <!-- 已送出訂單 Modal -->
+  <!-- 我的訂單 Modal -->
   <div class="modal" id="myOrderModal">
     <div class="modal-box">
       <h2 style="margin-top:0">📋 我的訂單</h2>
@@ -580,18 +568,31 @@ app.get('/order', async (req, res) => {
   </div>
 
 <script>
-const menu = ${menuJson};
-const optionData = ${optionJson};
-const LIFF_ID = '2010025093-yATK02dc';
-
+// ── 全域資料（由 /api/menu fetch，不內嵌）──────────────────────────
+const LIFF_ID = '${LIFF_ID}';
+let menu = [];
+let optionData = {};
 let profile = null;
 let liffReady = false;
 let currentItem = null;
 let currentGroups = [];
-let cart = [];  // { store, item, spec, note, qty, price }
+let cart = [];
 let editingRowIndex = null;
 
-// ── LIFF 初始化 ──────────────────────────────────────────────────
+// ── 菜單資料載入 ────────────────────────────────────────────────────
+async function loadMenuData() {
+  try {
+    const res = await fetch('/api/menu');
+    const data = await res.json();
+    menu = data.menu || [];
+    optionData = data.optionData || {};
+    renderMenu();
+  } catch (e) {
+    document.getElementById('loadingMsg').innerText = '菜單載入失敗，請重新整理';
+  }
+}
+
+// ── LIFF 初始化 ────────────────────────────────────────────────────
 async function initLIFF() {
   try {
     await liff.init({ liffId: LIFF_ID });
@@ -601,23 +602,22 @@ async function initLIFF() {
     document.getElementById('status').innerText = '已登入：' + profile.displayName;
     enableButtons();
     document.getElementById('cartFab').style.display = '';
+    addMyOrderBtn();
     checkOrderStatus();
     loadMyOrders();
   } catch (err) {
-    document.getElementById('status').innerText = 'LIFF 初始化失敗，請重新整理';
+    console.error('LIFF error:', err);
+    document.getElementById('status').innerText = 'LIFF 初始化失敗：' + err.message;
   }
 }
 
-// ── 訂單狀態 ─────────────────────────────────────────────────────
+// ── 訂單狀態 ───────────────────────────────────────────────────────
 async function checkOrderStatus() {
   try {
     const res = await fetch('/api/status');
     const data = await res.json();
-    const el = document.getElementById('orderStatus');
-    el.innerText = data.isOpen ? '🟢 目前開放點餐' : '🔴 目前未開放點餐';
-    if (data.autoCloseAt) {
-      startCountdown(data.autoCloseAt);
-    }
+    document.getElementById('orderStatus').innerText = data.isOpen ? '🟢 目前開放點餐' : '🔴 目前未開放點餐';
+    if (data.autoCloseAt) startCountdown(data.autoCloseAt);
   } catch(e) {}
 }
 
@@ -626,78 +626,94 @@ function startCountdown(isoStr) {
   function tick() {
     const diff = new Date(isoStr) - new Date();
     if (diff <= 0) { el.innerText = ''; return; }
-    const m = Math.floor(diff / 60000);
-    const s = Math.floor((diff % 60000) / 1000);
+    const m = Math.floor(diff/60000), s = Math.floor((diff%60000)/1000);
     el.innerText = '⏰ 自動結單：' + m + '分' + s + '秒後';
     setTimeout(tick, 1000);
   }
   tick();
 }
 
-// ── 菜單渲染 ─────────────────────────────────────────────────────
+// ── 菜單渲染 ───────────────────────────────────────────────────────
 function renderMenu() {
   const box = document.getElementById('menu');
   const tabsBox = document.getElementById('storeTabs');
-  if (!menu || menu.length === 0) { box.innerHTML = '<div class="empty">目前沒有菜單資料</div>'; return; }
+  document.getElementById('loadingMsg') && (document.getElementById('loadingMsg').style.display='none');
+
+  if (!menu || menu.length === 0) {
+    box.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
+    return;
+  }
+
   const stores = [...new Set(menu.map(m => m.store).filter(Boolean))];
   tabsBox.innerHTML = stores.map((s, i) =>
-    '<button class="tab-btn" id="tab-'+i+'" onclick="scrollToStore('+i+')">' + s + '</button>'
+    '<button class="tab-btn" id="tab-'+i+'" onclick="scrollToStore('+i+')">' + escHtml(s) + '</button>'
   ).join('');
+
   let html = '', currentStore = '';
   menu.forEach((m, index) => {
     if (m.store !== currentStore) {
       currentStore = m.store;
       const si = stores.indexOf(currentStore);
-      html += '<div id="store-'+si+'" class="store-title">'+currentStore+'</div>';
+      html += '<div id="store-'+si+'" class="store-title">'+escHtml(currentStore)+'</div>';
     }
     html += '<div class="card">'
-      + '<div class="store">' + (m.store||'') + '</div>'
-      + '<div class="item-name">' + (m.item||'') + '</div>'
-      + '<div class="price">$' + (m.price||0) + '</div>'
-      + '<button class="btn" onclick="addToCart('+index+')" id="btn-'+index+'" disabled>載入中...</button>'
+      + '<div class="store-label">'+escHtml(m.store)+'</div>'
+      + '<div class="item-name">'+escHtml(m.item)+'</div>'
+      + '<div class="price">$'+Number(m.price)+'</div>'
+      + '<button class="btn" onclick="addToCart('+index+')" id="btn-'+index+'" disabled>登入中...</button>'
       + '</div>';
   });
   box.innerHTML = html;
+
+  // 若 LIFF 已就緒（菜單比 LIFF 慢載入時）
+  if (liffReady) enableButtons();
 }
 
 function scrollToStore(index) {
-  document.getElementById('tab-' + index) && document.querySelectorAll('.tab-btn').forEach((b,i)=>{
-    b.classList.toggle('active', i === index);
-  });
-  const el = document.getElementById('store-' + index);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===index));
+  const el = document.getElementById('store-'+index);
+  if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 function enableButtons() {
   menu.forEach((_, index) => {
-    const btn = document.getElementById('btn-' + index);
+    const btn = document.getElementById('btn-'+index);
     if (btn) { btn.disabled = false; btn.innerText = '加入購物車'; }
   });
 }
 
-// ── 加入購物車（開 Modal）────────────────────────────────────────
+// ── 加入購物車 ─────────────────────────────────────────────────────
 function addToCart(index) {
   if (!liffReady || !profile) { alert('尚未取得 LINE 使用者資料'); return; }
   currentItem = menu[index];
   const key = currentItem.store + '||' + currentItem.item;
   currentGroups = optionData[key] || [];
+
   document.getElementById('modalTitle').innerText = currentItem.item;
   document.getElementById('qtySelect').value = '1';
   document.getElementById('itemNote').value = '';
+
   const optionBox = document.getElementById('modalOptions');
   optionBox.innerHTML = '';
+
   if (currentGroups.length === 0) {
     optionBox.innerHTML = '<div style="color:#777;margin:10px 0">此商品無需選擇規格</div>';
   } else {
     currentGroups.forEach((group, gi) => {
       const title = document.createElement('div');
       title.style.marginTop = '16px';
-      title.innerHTML = '<b>' + group.category + '</b><br>請選 ' + group.min + '~' + group.max + ' 個';
+      title.innerHTML = '<b>'+escHtml(group.category)+'</b><br>請選 '+group.min+'~'+group.max+' 個';
       optionBox.appendChild(title);
       group.options.forEach(opt => {
         const label = document.createElement('label');
         label.className = 'option-label';
-        label.innerHTML = '<input type="checkbox" value="' + opt + '" data-group="' + gi + '" onchange="limitCheck(' + gi + ',' + group.max + ')"> ' + opt;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = opt;
+        cb.dataset.group = gi;
+        cb.addEventListener('change', () => limitCheck(gi, group.max));
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + opt));
         optionBox.appendChild(label);
       });
     });
@@ -707,8 +723,9 @@ function addToCart(index) {
 
 function limitCheck(gi, max) {
   const checked = [...document.querySelectorAll('input[data-group="'+gi+'"]:checked')];
-  const all = [...document.querySelectorAll('input[data-group="'+gi+'"]')];
-  all.forEach(x => { x.disabled = checked.length >= max && !x.checked; });
+  document.querySelectorAll('input[data-group="'+gi+'"]').forEach(x => {
+    x.disabled = checked.length >= max && !x.checked;
+  });
 }
 
 function submitOptions() {
@@ -719,14 +736,15 @@ function submitOptions() {
     if (checked.length < group.min || checked.length > group.max) {
       alert(group.category + ' 需要選 ' + group.min + '~' + group.max + ' 個'); return;
     }
-    specText += group.category + '：' + checked.map(x => x.value).join('、') + ' ';
+    if (checked.length > 0)
+      specText += group.category + '：' + checked.map(x => x.value).join('、') + ' ';
   }
   cart.push({
     store: currentItem.store,
     item:  currentItem.item,
     spec:  specText.trim(),
     note:  document.getElementById('itemNote').value.trim(),
-    qty:   Number(document.getElementById('qtySelect').value || 1),
+    qty:   Number(document.getElementById('qtySelect').value) || 1,
     price: currentItem.price
   });
   closeModal('optionModal');
@@ -736,51 +754,39 @@ function submitOptions() {
 
 // ── 購物車 ────────────────────────────────────────────────────────
 function updateCartBadge() {
-  const total = cart.reduce((a, c) => a + c.qty, 0);
-  document.getElementById('cartBadge').innerText = total;
+  document.getElementById('cartBadge').innerText = cart.reduce((a,c) => a+c.qty, 0);
 }
 
-function openCart() {
-  renderCart();
-  openModal('cartModal');
-}
+function openCart() { renderCart(); openModal('cartModal'); }
 
 function renderCart() {
   const listEl = document.getElementById('cartList');
   const totalEl = document.getElementById('cartTotal');
   if (cart.length === 0) {
-    listEl.innerHTML = '<div class="empty" style="margin:20px 0">購物車是空的</div>';
+    listEl.innerHTML = '<div class="empty">購物車是空的</div>';
     totalEl.innerText = '';
     return;
   }
-  let html = '';
-  cart.forEach((c, i) => {
+  listEl.innerHTML = cart.map((c, i) => {
     const sub = [c.spec, c.note].filter(Boolean).join('｜');
-    html += '<div class="cart-item">'
+    return '<div class="cart-item">'
       + '<div class="cart-info">'
-      + '<div class="cart-name">' + c.item + ' x' + c.qty + '</div>'
-      + (sub ? '<div class="cart-sub">' + sub + '</div>' : '')
+      + '<div class="cart-name">'+escHtml(c.item)+' x'+c.qty+'</div>'
+      + (sub ? '<div class="cart-sub">'+escHtml(sub)+'</div>' : '')
       + '</div>'
-      + '<div class="cart-price">$' + (c.price * c.qty) + '</div>'
-      + '<button class="icon-btn" onclick="removeCartItem('+i+')" title="刪除">🗑</button>'
+      + '<div class="cart-price">$'+(c.price*c.qty)+'</div>'
+      + '<button class="icon-btn" onclick="removeCartItem('+i+')">🗑</button>'
       + '</div>';
-  });
-  listEl.innerHTML = html;
-  const total = cart.reduce((a, c) => a + c.price * c.qty, 0);
-  totalEl.innerText = '合計：$' + total;
+  }).join('');
+  totalEl.innerText = '合計：$' + cart.reduce((a,c) => a+c.price*c.qty, 0);
 }
 
-function removeCartItem(i) {
-  cart.splice(i, 1);
-  updateCartBadge();
-  renderCart();
-}
+function removeCartItem(i) { cart.splice(i,1); updateCartBadge(); renderCart(); }
 
 async function submitCart() {
   if (cart.length === 0) { alert('購物車是空的'); return; }
-  document.getElementById('submitCartBtn').disabled = true;
-  document.getElementById('submitCartBtn').innerText = '送出中...';
-  let allOk = true;
+  const btn = document.getElementById('submitCartBtn');
+  btn.disabled = true; btn.innerText = '送出中...';
   for (const c of cart) {
     const res = await fetch('/api/order', {
       method: 'POST',
@@ -788,30 +794,23 @@ async function submitCart() {
       body: JSON.stringify({ ...c, name: profile.displayName, userId: profile.userId })
     });
     const result = await res.json();
-    if (!result.success) {
-      if (result.reason === 'duplicate') {
-        showToast('⚠️ ' + c.item + ' 已送出過，略過');
-      } else {
-        allOk = false;
-      }
-    }
+    if (!result.success && result.reason === 'duplicate')
+      showToast('⚠️ ' + c.item + ' 已送出過，略過');
   }
   cart = [];
   updateCartBadge();
   closeModal('cartModal');
-  document.getElementById('submitCartBtn').disabled = false;
-  document.getElementById('submitCartBtn').innerText = '送出訂單';
-  if (allOk) { showToast('訂單已送出 ✅'); loadMyOrders(); }
-  else { alert('部分品項送出失敗，請重試'); }
+  btn.disabled = false; btn.innerText = '送出訂單';
+  showToast('訂單已送出 ✅');
+  loadMyOrders();
 }
 
-// ── 我的訂單 ─────────────────────────────────────────────────────
+// ── 我的訂單 ──────────────────────────────────────────────────────
 async function loadMyOrders() {
   if (!profile) return;
   try {
     const res = await fetch('/api/my-orders?userId=' + encodeURIComponent(profile.userId));
-    const orders = await res.json();
-    renderMyOrders(orders);
+    renderMyOrders(await res.json());
   } catch(e) {}
 }
 
@@ -819,49 +818,41 @@ function renderMyOrders(orders) {
   const listEl = document.getElementById('myOrderList');
   const totalEl = document.getElementById('myOrderTotal');
   if (!orders || orders.length === 0) {
-    listEl.innerHTML = '<div class="empty" style="margin:20px 0">今天還沒有訂單</div>';
-    totalEl.innerText = '';
-    return;
+    listEl.innerHTML = '<div class="empty">今天還沒有訂單</div>';
+    totalEl.innerText = ''; return;
   }
-  let html = '';
-  let total = 0;
-  orders.forEach(o => {
-    total += o.total;
+  listEl.innerHTML = orders.map(o => {
     const sub = [o.spec, o.note].filter(Boolean).join('｜');
-    const statusTag = o.status === '已付款'
+    const tag = o.status === '已付款'
       ? '<span class="tag paid">已付款</span>'
       : '<span class="tag unpaid">未付款</span>';
-    html += '<div class="cart-item">'
+    const canEdit = o.status !== '已付款';
+    return '<div class="cart-item">'
       + '<div class="cart-info">'
-      + '<div class="cart-name">' + o.item + ' x' + o.qty + ' ' + statusTag + '</div>'
-      + (sub ? '<div class="cart-sub">' + sub + '</div>' : '')
-      + '<div class="cart-sub">' + o.store + '</div>'
+      + '<div class="cart-name">'+escHtml(o.item)+' x'+o.qty+' '+tag+'</div>'
+      + (sub ? '<div class="cart-sub">'+escHtml(sub)+'</div>' : '')
+      + '<div class="cart-sub">'+escHtml(o.store)+'</div>'
       + '</div>'
       + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
-      + '<div class="cart-price">$' + o.total + '</div>'
-      + (o.status !== '已付款'
-          ? '<button class="icon-btn" onclick="editNote('+o.rowIndex+',\''+escHtml(o.note)+'\')" title="備註">✏️</button>'
+      + '<div class="cart-price">$'+o.total+'</div>'
+      + (canEdit
+          ? '<button class="icon-btn" onclick="editNote('+o.rowIndex+','+JSON.stringify(o.note||'')+')" title="修改備註">✏️</button>'
           + '<button class="icon-btn" onclick="delOrder('+o.rowIndex+')" title="刪除">🗑</button>'
           : '')
-      + '</div>'
-      + '</div>';
-  });
-  listEl.innerHTML = html;
-  totalEl.innerText = '今日合計：$' + total;
+      + '</div></div>';
+  }).join('');
+  totalEl.innerText = '今日合計：$' + orders.reduce((a,o)=>a+o.total,0);
 }
-
-function escHtml(s) { return (s||'').replace(/'/g,"\\'"); }
 
 async function delOrder(rowIndex) {
   if (!confirm('確定要刪除這筆訂單？')) return;
-  const res = await fetch('/api/order/' + rowIndex, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch('/api/order/'+rowIndex, {
+    method:'DELETE', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ userId: profile.userId })
   });
-  const result = await res.json();
-  if (result.success) { showToast('已刪除'); loadMyOrders(); }
-  else { alert('刪除失敗'); }
+  const r = await res.json();
+  if (r.success) { showToast('已刪除'); loadMyOrders(); }
+  else alert('刪除失敗');
 }
 
 function editNote(rowIndex, currentNote) {
@@ -872,42 +863,34 @@ function editNote(rowIndex, currentNote) {
 
 async function saveNote() {
   const note = document.getElementById('editNoteInput').value.trim();
-  const res = await fetch('/api/order/' + editingRowIndex + '/note', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch('/api/order/'+editingRowIndex+'/note', {
+    method:'PATCH', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ userId: profile.userId, note })
   });
-  const result = await res.json();
-  if (result.success) { showToast('備註已更新'); closeModal('editNoteModal'); loadMyOrders(); }
-  else { alert('更新失敗'); }
+  const r = await res.json();
+  if (r.success) { showToast('備註已更新'); closeModal('editNoteModal'); loadMyOrders(); }
+  else alert('更新失敗');
 }
 
-// ── Modal 控制 ────────────────────────────────────────────────────
+// ── Modal / Toast / 工具 ──────────────────────────────────────────
 function openModal(id) {
-  const m = document.getElementById(id);
-  m.style.display = 'flex';
-  // 若是我的訂單，先刷新
+  document.getElementById(id).style.display = 'flex';
   if (id === 'myOrderModal') loadMyOrders();
 }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-// ── Toast ─────────────────────────────────────────────────────────
 function showToast(msg) {
-  let t = document.getElementById('toast');
+  let t = document.getElementById('_toast');
   if (!t) {
-    t = document.createElement('div');
-    t.id = 'toast';
-    t.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:999px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s';
+    t = document.createElement('div'); t.id = '_toast';
+    t.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:999px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none';
     document.body.appendChild(t);
   }
-  t.innerText = msg;
-  t.style.opacity = '1';
-  setTimeout(() => { t.style.opacity = '0'; }, 2000);
+  t.innerText = msg; t.style.opacity = '1';
+  setTimeout(() => { t.style.opacity = '0'; }, 2200);
 }
 
-// ── 我的訂單入口（加在購物車旁）─────────────────────────────────
 function addMyOrderBtn() {
-  const fab = document.getElementById('cartFab');
   const btn = document.createElement('button');
   btn.className = 'cart-fab';
   btn.style.right = '140px';
@@ -916,20 +899,19 @@ function addMyOrderBtn() {
   document.body.appendChild(btn);
 }
 
-// ── Init ──────────────────────────────────────────────────────────
-renderMenu();
-initLIFF().then(() => { addMyOrderBtn(); });
-setInterval(checkOrderStatus, 30000);
-<\/script>
-</body>
-</html>`;
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-    res.send(html);
-  } catch (err) {
-    console.error('載入訂餐頁失敗：', err.message);
-    res.send('載入訂餐頁失敗，請稍後再試');
-  }
+// ── 啟動 ──────────────────────────────────────────────────────────
+loadMenuData();   // 先載菜單（不需等 LIFF）
+initLIFF();       // 同時初始化 LIFF
+setInterval(checkOrderStatus, 30000);
+</script>
+</body>
+</html>`);
 });
+
 
 // ─── 管理後台 ─────────────────────────────────────────────────────
 app.get('/admin', async (req, res) => {
