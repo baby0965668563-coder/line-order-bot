@@ -364,6 +364,7 @@ app.get('/order', async (req, res) => {
     const menu = await loadMenu();
 const optionData = await loadOptions();
     const menuJson = JSON.stringify(menu).replace(/</g, '\\u003c');
+    const optionJson = JSON.stringify(optionData).replace(/</g, '\\u003c');
 
     const html = `
 <!DOCTYPE html>
