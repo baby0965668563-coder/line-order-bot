@@ -383,12 +383,37 @@ function parseOrders(text) {
 }
 
 function formatResult(itemCount, userTotal) {
-  let text = '📊 訂餐統計\n\n【品項數量】\n';
-  for (let item in itemCount) if (itemCount[item] > 0) text += `${item} x${itemCount[item]}\n`;
+
+  let text = '📊 訂餐統計\n\n';
+
+  text += '【品項數量】\n';
+
+  for (let item in itemCount) {
+
+    if (itemCount[item] > 0) {
+
+      text += item + ' x' + itemCount[item] + '\n';
+
+    }
+
+  }
+
   text += '\n【個人金額】\n';
-  for (let user in userTotal) text += `${user}：$${userTotal[user]}\n`;
-  text += `\n💰 總金額：$${Object.values(userTotal).reduce((a, b) => a + b, 0)}`;
+
+  for (let user in userTotal) {
+
+    text += user + '：$' + userTotal[user] + '\n';
+
+  }
+
+  const total =
+    Object.values(userTotal)
+      .reduce((a, b) => a + b, 0);
+
+  text += '\n💰 總金額：$' + total;
+
   return text;
+
 }
 
 function formatShopOrder(itemCount, userTotal) {
