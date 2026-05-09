@@ -575,7 +575,7 @@ app.post('/api/order', async (req, res) => {
   } else {
     res.status(500).json({ success: false });
   }
-});
+
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
