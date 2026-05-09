@@ -541,25 +541,79 @@ async function initLIFF() {
 }
 
 async function addOrder(index) {
+
   if (!liffReady || !profile) {
-    alert('尚未取得 LINE 使用者資料，請重新整理頁面');
+    alert('尚未取得 LINE 使用者資料');
     return;
   }
 
   const item = visibleMenu[index];
+
+  const key =
+    item.store + '||' + item.item;
+
+  const groups = optionData[key] || [];
+
+  let specText = '';
+
+  for (const group of groups) {
+
+    let selected = [];
+
+    while (true) {
+
+      const input = prompt(
+        '【' + group.category + '】\\n' +
+        '請選 ' + group.min + ' ~ ' + group.max + ' 個\\n\\n' +
+        group.options.join('\\n')
+      );
+
+      if (!input) {
+        alert('已取消');
+        return;
+      }
+
+      selected = input
+        .split(',')
+        .map(x => x.trim())
+        .filter(Boolean);
+
+      if (
+        selected.length >= group.min &&
+        selected.length <= group.max
+      ) {
+        break;
+      }
+
+      alert(
+        '請選擇 ' +
+        group.min +
+        ' ~ ' +
+        group.max +
+        ' 個'
+      );
+    }
+
+    specText +=
+      group.category +
+      '：' +
+      selected.join('、') +
+      ' ';
+  }
 
   const orderData = {
     name: profile.displayName || '',
     userId: profile.userId || '',
     store: item.store || '',
     item: item.item || '',
-    spec: '',
+    spec: specText.trim(),
     note: '',
     qty: 1,
     price: item.price || 0
   };
 
   try {
+
     const res = await fetch('/api/order', {
       method: 'POST',
       headers: {
@@ -575,8 +629,11 @@ async function addOrder(index) {
     } else {
       alert('加入失敗');
     }
+
   } catch (err) {
+
     alert('送出失敗：' + err.message);
+
   }
 }
 
