@@ -351,6 +351,25 @@ button{
 <h2 id="modalTitle"></h2>
 
 <div id="modalOptions"></div>
+<div style="margin-top:16px;">
+  <div style="margin-bottom:8px;font-weight:bold;">
+    數量
+  </div>
+
+  <select id="qtySelect" style="
+    width:100%;
+    padding:12px;
+    border-radius:12px;
+    border:1px solid #ddd;
+    font-size:16px;
+  ">
+    <option value="1">1份</option>
+    <option value="2">2份</option>
+    <option value="3">3份</option>
+    <option value="4">4份</option>
+    <option value="5">5份</option>
+  </select>
+</div>
 
 <button onclick="submitOptions()">
 確認加入
