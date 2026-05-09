@@ -697,6 +697,90 @@ async function addOrder(index) {
   }
 }
 
+async function submitOptions() {
+
+  let specText = '';
+
+  for (let i = 0; i < currentGroups.length; i++) {
+
+    const group = currentGroups[i];
+
+    const checked = [
+      ...document.querySelectorAll(
+        'input[data-group="' + i + '"]:checked'
+      )
+    ];
+
+    if (
+      checked.length < group.min ||
+      checked.length > group.max
+    ) {
+
+      alert(
+        group.category +
+        ' 需要選 ' +
+        group.min +
+        ' ~ ' +
+        group.max +
+        ' 個'
+      );
+
+      return;
+    }
+
+    const values =
+      checked.map(x => x.value);
+
+    specText +=
+      group.category +
+      '：' +
+      values.join('、') +
+      ' ';
+  }
+
+  document.getElementById('optionModal').style.display =
+    'none';
+
+  submitFinalOrder(specText.trim());
+}
+
+async function submitFinalOrder(specText) {
+
+  const orderData = {
+    name: profile.displayName || '',
+    userId: profile.userId || '',
+    store: currentItem.store || '',
+    item: currentItem.item || '',
+    spec: specText || '',
+    note: '',
+    qty: 1,
+    price: currentItem.price || 0
+  };
+
+  try {
+
+    const res = await fetch('/api/order', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(orderData)
+    });
+
+    const result = await res.json();
+
+    if (result.success) {
+      alert('已加入訂單');
+    } else {
+      alert('加入失敗');
+    }
+
+  } catch (err) {
+
+    alert('送出失敗：' + err.message);
+
+  }
+}
 renderMenu();
 initLIFF();
 </script>
