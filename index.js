@@ -538,8 +538,6 @@ app.post('/api/order', async (req, res) => {
   }
 });
 
-  const success = await saveOrderToSheet(req.body);
-
   try {
 
     await authSheet();
