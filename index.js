@@ -19,7 +19,6 @@ let allText = '';
 
 const knownUsers = {};
 
-// 管理員名單，只放妳跟之後管理員的 userId
 const admins = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f",
   "Ubcfae64b443b9fad21bbc584e991b306",
@@ -40,7 +39,6 @@ async function saveUserToSheet(profileName, userId, sourceType, groupId) {
     await doc.loadInfo();
 
     const sheet = doc.sheetsByTitle['Users'];
-
     if (!sheet) {
       console.error('找不到 Users 分頁');
       return;
@@ -222,6 +220,28 @@ function formatResult(itemCount, userTotal) {
   return text;
 }
 
+function formatShopOrder(itemCount, userTotal) {
+  let orderText = '您好，今天訂購如下：\n\n';
+  let totalCount = 0;
+
+  for (let item in itemCount) {
+    const qty = itemCount[item];
+
+    if (qty > 0) {
+      orderText += `${item} x${qty}\n`;
+      totalCount += qty;
+    }
+  }
+
+  const totalMoney = Object.values(userTotal).reduce((a, b) => a + b, 0);
+
+  orderText += `\n總數：${totalCount}份`;
+  orderText += `\n總金額：${totalMoney}元`;
+  orderText += '\n\n麻煩您，謝謝～';
+
+  return orderText;
+}
+
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const event = req.body.events[0];
@@ -317,6 +337,26 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
+    if (text === '店家單') {
+      if (!isAdmin(userId)) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '只有管理員可以查看店家單'
+        });
+        return res.sendStatus(200);
+      }
+
+      const result = parseOrders(allText);
+      const reply = formatShopOrder(result.itemCount, result.userTotal);
+
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: reply
+      });
+
+      return res.sendStatus(200);
+    }
+
     if (text === '結單' || text === '收單' || text === '統計') {
       if (!isAdmin(userId)) {
         await client.replyMessage(event.replyToken, {
@@ -339,7 +379,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 群組所有人都可以點餐，但只有開單後才記錄文字
     if (isOpen && event.message.type === 'text') {
       allText += '\n' + text;
     }
