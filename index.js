@@ -184,6 +184,9 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     const event = req.body.events[0];
 
    if (!event || event.type !== 'message') {
+     const text = event.message.text
+  ? event.message.text.trim()
+  : '[非文字訊息]';
       return res.sendStatus(200);
     }
 console.log("來源類型：", event.source.type);
