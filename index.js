@@ -20,26 +20,47 @@ let allText = '';
 const knownUsers = {};
 
 const admins = [
-  "U8d9c82446aa9eb90d7de001cfc7ea90f",
-  "Ubcfae64b443b9fad21bbc584e991b306",
-  "U5c44a04efc62664bd45ec80d77be7d93",
-  "Uc669eca67bf477460945f45751edd3e9" 
+  "U8d9c82446aa9eb90d7de001cfc7ea90f"
 ];
 
 function isAdmin(userId) {
   return admins.includes(userId);
 }
 
+async function authSheet() {
+  await doc.useServiceAccountAuth({
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+  });
+
+  await doc.loadInfo();
+}
+
+async function loadMenu() {
+  await authSheet();
+
+  const menuSheet = doc.sheetsByTitle['Menu'];
+
+  if (!menuSheet) {
+    console.error('找不到 Menu 分頁');
+    return [];
+  }
+
+  const rows = await menuSheet.getRows();
+
+  return rows.map(r => ({
+    store: r['店家'],
+    item: r['品項'],
+    price: r['價格']
+  }));
+}
+
 async function saveUserToSheet(profileName, userId, sourceType, groupId) {
   try {
-    await doc.useServiceAccountAuth({
-      client_email: process.env.GOOGLE_CLIENT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    });
-
-    await doc.loadInfo();
+    await authSheet();
 
     const sheet = doc.sheetsByTitle['Users'];
+
     if (!sheet) {
       console.error('找不到 Users 分頁');
       return;
@@ -242,6 +263,130 @@ function formatShopOrder(itemCount, userTotal) {
 
   return orderText;
 }
+
+app.get('/order', async (req, res) => {
+  try {
+    const menu = await loadMenu();
+
+    let html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>訂餐小幫手</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft JhengHei", sans-serif;
+      background: #f6f3ee;
+      color: #333;
+    }
+
+    .header {
+      padding: 20px;
+      background: #ffffff;
+      border-bottom: 1px solid #eee;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header h2 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    .header p {
+      margin: 6px 0 0;
+      color: #777;
+      font-size: 14px;
+    }
+
+    .container {
+      padding: 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+
+    .store {
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 6px;
+    }
+
+    .item {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .price {
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: #444;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 999px;
+      background: #06c755;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .empty {
+      text-align: center;
+      color: #999;
+      margin-top: 60px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>訂餐小幫手</h2>
+    <p>請選擇今天要訂的餐點</p>
+  </div>
+
+  <div class="container">
+`;
+
+    if (menu.length === 0) {
+      html += `<div class="empty">目前沒有菜單資料</div>`;
+    } else {
+      menu.forEach(item => {
+        html += `
+    <div class="card">
+      <div class="store">${item.store || ''}</div>
+      <div class="item">${item.item || ''}</div>
+      <div class="price">$${item.price || 0}</div>
+      <button onclick="alert('下一步會做加入訂單功能')">加入訂單</button>
+    </div>
+`;
+      });
+    }
+
+    html += `
+  </div>
+</body>
+</html>
+`;
+
+    res.send(html);
+  } catch (err) {
+    console.error('載入訂餐頁失敗：', err.message);
+    res.send('載入訂餐頁失敗，請稍後再試');
+  }
+});
 
 app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
