@@ -777,20 +777,18 @@ async function submitFinalOrder(specText){
 
 }
 
-function scrollToStore(store){
+function scrollToStore(index){
 
-  const el =
-    document.getElementById(
-      'store-' + store
-    );
+  const el = document.getElementById('store-' + index);
 
   if(el){
-
     el.scrollIntoView({
-      behavior:'smooth'
+      behavior:'smooth',
+      block:'start'
     });
-
   }
+
+}
 
 }
 renderMenu();
