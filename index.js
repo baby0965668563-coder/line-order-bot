@@ -799,7 +799,11 @@ function scrollToStore(index){
 }
 
 }
-renderMenu();
+try {
+  renderMenu();
+} catch (err) {
+  console.error('renderMenu error:', err);
+}
 
 initLIFF();
 
