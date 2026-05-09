@@ -412,6 +412,13 @@ app.get('/order', async (req, res) => {
 
 <script>
 const menu = ${menuJson};
+
+const visibleMenu = menu.filter(m =>
+  m.store &&
+  m.item &&
+  Number(m.price) > 0
+);
+
 const LIFF_ID = '2010025093-yATK02dc';
 
 let profile = null;
@@ -420,12 +427,12 @@ let liffReady = false;
 function renderMenu() {
   const menuBox = document.getElementById('menu');
 
-  if (!menu || menu.length === 0) {
+  if (!visibleMenu || visibleMenu.length === 0) {
     menuBox.innerHTML = '<div class="empty">目前沒有菜單資料</div>';
     return;
   }
 
-  menuBox.innerHTML = menu.map((m, index) => {
+  menuBox.innerHTML = visibleMenu.map((m, index) => {
     return \`
       <div class="card">
         <div class="store">\${m.store || ''}</div>
@@ -440,7 +447,7 @@ function renderMenu() {
 }
 
 function setButtonsReady() {
-  menu.forEach((_, index) => {
+  visibleMenu.forEach((_, index) => {
     const btn = document.getElementById('btn-' + index);
     if (btn) {
       btn.disabled = false;
@@ -479,7 +486,7 @@ async function addOrder(index) {
     return;
   }
 
-  const item = menu[index];
+  const item = visibleMenu[index];
 
   const orderData = {
     name: profile.displayName || '',
