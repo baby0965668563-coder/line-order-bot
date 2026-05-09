@@ -480,6 +480,38 @@ initLIFF();
 });
 
 app.post('/api/order', async (req, res) => {
+  app.get('/api/my-orders', async (req, res) => {
+
+  try {
+
+    await authSheet();
+
+    const userId = req.query.userId;
+
+    const sheet = doc.sheetsByTitle['Orders'];
+
+    const rows = await sheet.getRows();
+
+    const myOrders = rows
+      .filter(r => r['userId'] === userId)
+      .map(r => ({
+        store: r['店家'],
+        item: r['品項'],
+        spec: r['規格'],
+        note: r['備註'],
+        qty: r['數量'],
+        total: r['總價']
+      }));
+
+    res.json(myOrders);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json([]);
+  }
+});
   const success = await saveOrderToSheet(req.body);
 
   if (success) {
