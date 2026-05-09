@@ -439,6 +439,10 @@ async function initLIFF() {
 }
 async function addOrder(store, item, price) {
 
+  console.log('點擊加入訂單');
+  alert('按鈕有反應');
+
+  const orderData = {
   const orderData = {
     name: profile?.displayName || '',
 userId: profile?.userId || '',
