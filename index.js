@@ -405,6 +405,28 @@ function renderMenu(){
 
   const box =
     document.getElementById('menu');
+    const tabsBox =
+  document.getElementById('storeTabs');
+
+const stores =
+  [...new Set(menu.map(m => m.store))];
+
+tabsBox.innerHTML =
+  stores.map(store =>
+
+    '<button ' +
+    'style="' +
+      'width:auto;' +
+      'margin:4px;' +
+      'padding:10px 14px;' +
+      'border-radius:999px;' +
+    '" ' +
+    'onclick="scrollToStore(\'' + store + '\')"' +
+    '>' +
+      store +
+    '</button>'
+
+  ).join('');
 
   if(!menu.length){
 
