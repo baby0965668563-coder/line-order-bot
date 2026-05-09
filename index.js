@@ -22,7 +22,8 @@ const knownUsers = {};
 const admins = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f",
   "Ubcfae64b443b9fad21bbc584e991b306",
-  "U5c44a04efc62664bd45ec80d77be7d93" 
+  "U5c44a04efc62664bd45ec80d77be7d93",
+  "Uc669eca67bf477460945f45751edd3e9" 
 ];
 
 function isAdmin(userId) {
