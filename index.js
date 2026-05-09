@@ -183,7 +183,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     if (!event || event.type !== 'message' || event.message.type !== 'text') {
       return res.sendStatus(200);
     }
-
+console.log("使用者ID：", event.source.userId);
     const text = event.message.text.trim();
 
     if (text === '開單') {
