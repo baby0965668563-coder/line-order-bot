@@ -38,6 +38,63 @@ async function authSheet() {
   await doc.loadInfo();
 }
 
+async function loadOptions() {
+  await authSheet();
+
+  const groupSheet = doc.sheetsByTitle['OptionGroups'];
+  const optionSheet = doc.sheetsByTitle['Options'];
+
+  if (!groupSheet || !optionSheet) {
+    return {};
+  }
+
+  const groupRows = await groupSheet.getRows();
+  const optionRows = await optionSheet.getRows();
+
+  const result = {};
+
+  groupRows.forEach(g => {
+    const key =
+      String(g['店家']).trim() +
+      '||' +
+      String(g['品項']).trim();
+
+    if (!result[key]) {
+      result[key] = [];
+    }
+
+    result[key].push({
+      category: String(g['分類']).trim(),
+      required: String(g['必選']).trim() === 'TRUE',
+      min: Number(g['最少'] || 0),
+      max: Number(g['最多'] || 0),
+      options: []
+    });
+  });
+
+  optionRows.forEach(o => {
+    const key =
+      String(o['店家']).trim() +
+      '||' +
+      String(o['品項']).trim();
+
+    if (!result[key]) return;
+
+    const cat = String(o['分類']).trim();
+
+    const target = result[key].find(
+      x => x.category === cat
+    );
+
+    if (target) {
+      target.options.push(
+        String(o['選項']).trim()
+      );
+    }
+  });
+
+  return result;
+}
 async function loadMenu() {
   await authSheet();
 
