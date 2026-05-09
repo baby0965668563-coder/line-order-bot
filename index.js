@@ -471,6 +471,7 @@ const optionData = await loadOptions();
 
 <script>
 const menu = ${menuJson};
+const optionData = ${optionJson};
 
 const visibleMenu = menu.filter(m =>
   m.store &&
