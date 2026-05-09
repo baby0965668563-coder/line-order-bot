@@ -5,6 +5,7 @@ const line = require('@line/bot-sdk');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
+app.use('/api', express.json());
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -78,6 +79,38 @@ async function saveUserToSheet(profileName, userId, sourceType, groupId) {
     console.log('已寫入 Google 試算表');
   } catch (err) {
     console.error('寫入 Google 試算表失敗：', err.message);
+  }
+}
+async function saveOrderToSheet(order) {
+  try {
+    await authSheet();
+
+    const sheet = doc.sheetsByTitle['Orders'];
+
+    if (!sheet) {
+      console.error('找不到 Orders 分頁');
+      return false;
+    }
+
+    await sheet.addRow({
+      時間: new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }),
+      LINE名稱: order.name || '',
+      userId: order.userId || '',
+      店家: order.store || '',
+      品項: order.item || '',
+      規格: order.spec || '',
+      備註: order.note || '',
+      數量: order.qty || 1,
+      單價: order.price || 0,
+      總價: Number(order.price || 0) * Number(order.qty || 1),
+      狀態: '未付款'
+    });
+
+    console.log('已寫入 Orders');
+    return true;
+  } catch (err) {
+    console.error('寫入 Orders 失敗：', err.message);
+    return false;
   }
 }
 
@@ -369,7 +402,13 @@ app.get('/order', async (req, res) => {
       <div class="store">${item.store || ''}</div>
       <div class="item">${item.item || ''}</div>
       <div class="price">$${item.price || 0}</div>
-      <button onclick="alert('下一步會做加入訂單功能')">加入訂單</button>
+      <button onclick="addOrder(
+  '${item.store}',
+  '${item.item}',
+  '${item.price}'
+)">
+  加入訂單
+</button>
     </div>
 `;
       });
