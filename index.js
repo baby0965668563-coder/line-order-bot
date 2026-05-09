@@ -523,7 +523,7 @@ async function addOrder(index){
   optionBox.innerHTML = '';
 
   currentGroups.forEach(
-    (group,groupIndex)=>{
+  (group,i)=>{
 
     const title =
       document.createElement('div');
