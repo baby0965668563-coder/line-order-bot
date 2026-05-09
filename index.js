@@ -186,11 +186,31 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     if (!event || event.type !== 'message' || event.message.type !== 'text') {
       return res.sendStatus(200);
     }
+console.log("來源類型：", event.source.type);
 console.log("使用者ID：", event.source.userId);
+console.log("群組ID：", event.source.groupId || "不是群組");
 
 if (!event || event.type !== 'message' || event.message.type !== 'text') {
   return res.sendStatus(200);
 }
+    let profileName = "未知使用者";
+
+try {
+  if (event.source.type === "group") {
+    const profile = await client.getGroupMemberProfile(
+      event.source.groupId,
+      event.source.userId
+    );
+    profileName = profile.displayName;
+  } else {
+    const profile = await client.getProfile(event.source.userId);
+    profileName = profile.displayName;
+  }
+} catch (err) {
+  console.error("取得使用者名稱失敗：", err.message);
+}
+
+console.log("LINE名稱：", profileName);
 
 const userId = event.source.userId;
 
