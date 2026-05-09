@@ -573,6 +573,39 @@ async function addOrder(index){
 
 }
 
+function limitCheck(groupIndex, max){
+
+  const checked = [
+    ...document.querySelectorAll(
+      'input[data-group="' + groupIndex + '"]:checked'
+    )
+  ];
+
+  const all = [
+    ...document.querySelectorAll(
+      'input[data-group="' + groupIndex + '"]'
+    )
+  ];
+
+  if(checked.length >= max){
+
+    all.forEach(x=>{
+
+      if(!x.checked){
+        x.disabled = true;
+      }
+
+    });
+
+  }else{
+
+    all.forEach(x=>{
+      x.disabled = false;
+    });
+
+  }
+
+}
 async function submitOptions(){
 
   let specText = '';
