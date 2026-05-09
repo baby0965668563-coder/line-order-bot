@@ -468,6 +468,34 @@ const optionData = await loadOptions();
   </div>
 
   <div class="container" id="menu"></div>
+  <div id="optionModal" style="
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.5);
+  z-index:999;
+">
+
+  <div style="
+    background:white;
+    border-radius:20px;
+    padding:20px;
+    width:90%;
+    max-width:400px;
+    margin:50px auto;
+  ">
+
+    <h3 id="modalTitle"></h3>
+
+    <div id="modalOptions"></div>
+
+    <button onclick="submitOptions()">
+      確認加入
+    </button>
+
+  </div>
+
+</div>
 
 <script>
 const menu = ${menuJson};
