@@ -299,16 +299,22 @@ button{
 .modal{
   display:none;
   position:fixed;
-  inset:0;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
   background:rgba(0,0,0,0.5);
-  z-index:999;
+  z-index:9999;
+  justify-content:center;
+  align-items:center;
 }
 
 .modal-box{
   background:white;
   width:90%;
   max-width:420px;
-  margin:50px auto;
+  max-height:80vh;
+  overflow-y:auto;
   border-radius:20px;
   padding:20px;
 }
