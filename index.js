@@ -524,6 +524,7 @@ initLIFF();
   }
 });
 
+async (req, res) => {
 app.post('/api/order', async (req, res) => {
   console.log('收到訂單API');
   console.log(req.body);
