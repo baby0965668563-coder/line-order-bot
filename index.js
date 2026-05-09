@@ -525,9 +525,17 @@ initLIFF();
 });
 
 app.post('/api/order', async (req, res) => {
-  app.post('/api/order', async (req, res) => {
   console.log('收到訂單API');
   console.log(req.body);
+
+  const success = await saveOrderToSheet(req.body);
+
+  if (success) {
+    res.json({ success: true });
+  } else {
+    res.status(500).json({ success: false });
+  }
+});
 
   const success = await saveOrderToSheet(req.body);
 
