@@ -445,6 +445,9 @@ tabsBox.innerHTML =
 
       currentStore = m.store;
 
+html +=
+  '<div id="store-' + currentStore + '"></div>';
+
       html +=
         '<div style="' +
         'font-size:22px;' +
