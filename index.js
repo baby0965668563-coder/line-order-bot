@@ -14,6 +14,8 @@ const client = new line.Client(config);
 
 let isOpen = false;
 let allText = '';
+
+const knownUsers = {};
 const allowedUsers = [
   "U8d9c82446aa9eb90d7de001cfc7ea90f"
 ];
@@ -214,6 +216,10 @@ try {
 }
 
 console.log("LINE名稱：", profileName);
+
+knownUsers[profileName] = event.source.userId;
+
+console.log("已記錄使用者：", knownUsers);
 
 const userId = event.source.userId;
 
