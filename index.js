@@ -346,16 +346,7 @@ button{
   id="optionModal"
 >
 
-<div class=".modal-box{
-  background:white;
-  width:90%;
-  max-width:420px;
-  max-height:80vh;
-  overflow-y:auto;
-  margin:50px auto;
-  border-radius:20px;
-  padding:20px;
-}">
+<div class="modal-box">
 
 <h2 id="modalTitle"></h2>
 
