@@ -342,10 +342,9 @@ button{
 
 </div>
 
-<div
-  class="container"
-  id="menu"
-></div>
+<div class="container" id="storeTabs"></div>
+
+<div class="container" id="menu"></div>
 
 <div
   class="modal"
