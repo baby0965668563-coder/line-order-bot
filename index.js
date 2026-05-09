@@ -424,43 +424,41 @@ function renderMenu(){
 
       currentStore = m.store;
 
-      html += `
-        <div style="
-          font-size:22px;
-          font-weight:bold;
-          margin:24px 0 12px;
-          padding:10px 4px;
-        ">
-          ${currentStore}
-        </div>
-      `;
+      html +=
+        '<div style="' +
+        'font-size:22px;' +
+        'font-weight:bold;' +
+        'margin:24px 0 12px;' +
+        'padding:10px 4px;' +
+        '">' +
+        currentStore +
+        '</div>';
     }
 
-    html += `
-      <div class="card">
+    html +=
+      '<div class="card">' +
 
-        <div class="store">
-          ${m.store}
-        </div>
+        '<div class="store">' +
+          m.store +
+        '</div>' +
 
-        <div class="item">
-          ${m.item}
-        </div>
+        '<div class="item">' +
+          m.item +
+        '</div>' +
 
-        <div class="price">
-          $${m.price}
-        </div>
+        '<div class="price">$' +
+          m.price +
+        '</div>' +
 
-        <button
-          onclick="addOrder(${index})"
-          id="btn-${index}"
-          disabled
-        >
-          載入中...
-        </button>
+        '<button ' +
+          'onclick="addOrder(' + index + ')" ' +
+          'id="btn-' + index + '" ' +
+          'disabled' +
+        '>' +
+          '載入中...' +
+        '</button>' +
 
-      </div>
-    `;
+      '</div>';
 
   });
 
