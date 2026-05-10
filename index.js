@@ -1344,10 +1344,12 @@ function buildAdminPage() {
   p('  if(!act.length){alert("今日無訂單");return;}');
   p('  var cnt={};');
   p('  act.forEach(function(o){var k=o.item+(o.spec?"（"+o.spec+"）":"");cnt[k]=(cnt[k]||0)+o.qty;});');
-  p('  var txt="您好，今天訂購如下：\n\n",n=0;');
-  p('  Object.keys(cnt).forEach(function(k){txt+=k+" x"+cnt[k]+"\n";n+=cnt[k];});');
+  p('  var lines=["您好，今天訂購如下：",""];');
+  p('  var n=0;');
+  p('  Object.keys(cnt).forEach(function(k){lines.push(k+" x"+cnt[k]);n+=cnt[k];});');
   p('  var m=act.reduce(function(a,o){return a+o.total;},0);');
-  p('  txt+="\n總數："+n+"份\n總金額："+m+"元\n\n麻煩您，謝謝～";');
+  p('  lines.push("","總數："+n+"份","總金額："+m+"元","","麻煩您，謝謝～");');
+  p('  var txt=lines.join("\\\\n");');
   p('  navigator.clipboard.writeText(txt).then(function(){');
   p('    var btn=event.target;var orig=btn.textContent;');
   p('    btn.textContent="✓ 已複製";btn.style.background="#15803d";');
