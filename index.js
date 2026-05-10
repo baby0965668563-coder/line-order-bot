@@ -12,7 +12,7 @@ const lineConfig = {
 };
 
 app.use('/webhook', line.middleware(lineConfig));
-app.use(express.json());
+app.use('/api', express.json());
 
 const client = new line.Client(lineConfig);
 const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
