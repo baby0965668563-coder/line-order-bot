@@ -62,13 +62,13 @@ async function authSheet() {
 async function loadMenu() {
   await authSheet();
   const sheet = doc.sheetsByTitle['Menu'];
-  if (!sheet) return [];
+  if (!sheet) { console.error('loadMenu: Menu sheet not found'); return []; }
   const rows = await sheet.getRows();
   return rows
     .map(r => ({
       store: String(r['店家']    || '').trim(),
       item:  String(r['品項']    || '').trim(),
-      price: Number(r['價格']    || 0),
+      price: parseFloat(String(r['價格'] || '0').replace(/[^0-9.]/g, '')) || 0,
       image: String(r['圖片URL'] || '').trim()
     }))
     .filter(r => r.store && r.item && r.price > 0);
@@ -333,10 +333,18 @@ function adminAuth(req, res, next) {
 app.get('/', (_q,r) => r.send('LINE 訂餐機器人運作中'));
 
 app.get('/api/menu', async (_q, res) => {
+  let menu = [], optionData = {};
   try {
-    const [menu, optionData] = await Promise.all([loadMenu(), loadOptions()]);
-    res.json({ menu, optionData });
-  } catch(e) { res.status(500).json({ menu:[], optionData:{} }); }
+    menu = await loadMenu();
+  } catch(e) {
+    console.error('[/api/menu] loadMenu failed:', e.message);
+  }
+  try {
+    optionData = await loadOptions();
+  } catch(e) {
+    console.error('[/api/menu] loadOptions failed:', e.message);
+  }
+  res.json({ menu, optionData });
 });
 
 app.get('/api/status', (_q, res) => res.json({ isOpen, autoCloseAt }));
