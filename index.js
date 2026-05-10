@@ -349,6 +349,15 @@ app.get('/api/menu', async (_q, res) => {
 
 app.get('/api/status', (_q, res) => res.json({ isOpen, autoCloseAt }));
 
+// 管理員專用：取得後台連結（token 不暴露給前端）
+app.get('/api/admin/link', (req, res) => {
+  const uid = req.query.userId || '';
+  if (!isAdmin(uid)) return res.status(403).json({ error: 'forbidden' });
+  const token = process.env.ADMIN_TOKEN || '';
+  const base  = process.env.APP_URL || '';
+  res.json({ url: base + '/admin?token=' + token });
+});
+
 app.get('/api/my-dates', async (req, res) => {
   const { userId } = req.query;
   if (!userId) return res.json([]);
@@ -466,6 +475,7 @@ function buildOrderPage(liffId) {
   p('.fab:active{transform:scale(.95);box-shadow:0 2px 10px rgba(0,0,0,.15)}');
   p('.fab-cart{background:var(--g);color:#fff}');
   p('.fab-orders{background:#fff;color:var(--txt);border:1.5px solid var(--bdr)}');
+  p('.fab-admin{background:#1e293b;color:#fff}');
   p('.fab-hidden{display:none!important}');
   p('.badge{background:var(--r);color:#fff;border-radius:50%;min-width:18px;height:18px;font-size:10px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;padding:0 3px;margin-left:2px}');
   p('.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:flex-end;justify-content:center;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}');
@@ -536,6 +546,7 @@ function buildOrderPage(liffId) {
 
   /* ── FABs ────────────────────────────────────────────────── */
   p('<div class="fab-area">');
+  p('  <button class="fab fab-admin fab-hidden" id="fabAdmin" onclick="goAdmin()">⚙️ 後台</button>');
   p('  <button class="fab fab-orders fab-hidden" id="fabOrders" onclick="openModal(\'moOrders\')">📋 我的訂單</button>');
   p('  <button class="fab fab-cart fab-hidden" id="fabCart" onclick="openModal(\'moCart\')">🛒 購物車<span class="badge" id="cartBadge">0</span></button>');
   p('</div>');
@@ -636,6 +647,7 @@ function buildOrderPage(liffId) {
   p('    document.getElementById("fabCart").classList.remove("fab-hidden");');
   p('    document.getElementById("fabOrders").classList.remove("fab-hidden");');
   p('    checkStatus();');
+  p('    checkAdminLink();');
   p('  }catch(e){');
   p('    document.getElementById("hdUser").textContent="LIFF 初始化失敗："+e.message;');
   p('    console.error("LIFF error",e);');
@@ -967,6 +979,18 @@ function buildOrderPage(liffId) {
   p('});');
 
   /* toast */
+  p('var _adminUrl=null;');
+  p('async function checkAdminLink(){');
+  p('  if(!profile)return;');
+  p('  try{');
+  p('    var r=await fetch("/api/admin/link?userId="+encodeURIComponent(profile.userId));');
+  p('    if(!r.ok)return;');
+  p('    var d=await r.json();');
+  p('    if(d.url){_adminUrl=d.url;document.getElementById("fabAdmin").classList.remove("fab-hidden");}');
+  p('  }catch(e){}');
+  p('}');
+  p('function goAdmin(){if(_adminUrl)window.open(_adminUrl,"_blank");}');
+
   p('var _toastTimer=null;');
   p('function showToast(msg){');
   p('  var t=document.getElementById("toast");');
