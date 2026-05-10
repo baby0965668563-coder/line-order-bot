@@ -259,6 +259,26 @@ async function adminDeleteOrder(rowIndex) {
   } catch(e) { return false; }
 }
 
+async function clearTodayOrders() {
+  try {
+    await authSheet();
+    const s = doc.sheetsByTitle['Orders'];
+    if (!s) return { success:false, count:0 };
+    const rows  = await s.getRows();
+    const today = todayTW();
+    let count = 0;
+    for (const r of rows) {
+      if (String(r['時間']||'').startsWith(today) && String(r['狀態']||'')!=='已刪除') {
+        r['狀態']='已刪除'; await r.save(); count++;
+      }
+    }
+    return { success:true, count };
+  } catch(e) {
+    console.error('clearTodayOrders fail:', e.message);
+    return { success:false, count:0 };
+  }
+}
+
 // ════════════════════════════════════════════════════════════════
 //  自動結單
 // ════════════════════════════════════════════════════════════════
@@ -407,6 +427,10 @@ app.post('/api/admin/batch-paid', adminAuth, async (req,res) => {
 });
 app.post('/api/admin/delete-order', adminAuth, async (req,res) => {
   res.json({ success: await adminDeleteOrder(req.body.rowIndex) });
+});
+
+app.post('/api/admin/clear-today', adminAuth, async (_q, res) => {
+  res.json(await clearTodayOrders());
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -1337,6 +1361,16 @@ function buildAdminPage() {
   p('}');
   p('async function doDelOrder(ri){if(!confirm("確定刪除？"))return;await api("/api/admin/delete-order","POST",{rowIndex:ri});loadOrders();}');
   p('async function doBatchPaid(){if(!confirm("將所有未付款標記為已付款？"))return;await api("/api/admin/batch-paid","POST",{payType:"現金"});loadOrders();}');
+
+  p('async function doClearToday(){');
+  p('  var date=document.getElementById("dateF").value;');
+  p('  var label=date||"今日";');
+  p('  if(!confirm("確定清空 "+label+" 的所有訂單？此操作會將當日訂單標記為已刪除，無法還原。"))return;');
+  p('  if(!confirm("再次確認：清空 "+label+" 全部訂單？"))return;');
+  p('  var d=await api("/api/admin/clear-today","POST",{});');
+  p('  if(d.success){alert("已清空 "+d.count+" 筆訂單");loadOrders();}');
+  p('  else alert("清空失敗，請重試");');
+  p('}');
 
   /* copy shop order */
   p('function copyShop(){');
