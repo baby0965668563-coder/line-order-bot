@@ -518,8 +518,8 @@ function orderPageHtml(liffId) {
     '.btn{width:100%;padding:12px;border:none;border-radius:999px;background:#06c755;color:#fff;font-size:15px;font-weight:bold;cursor:pointer}',
     '.btn:disabled{background:#aaa;cursor:default}',
     '.btn.secondary{background:#999}',
-    '.cart-fab{position:fixed;bottom:24px;right:20px;background:#06c755;color:#fff;border:none;border-radius:50px;padding:14px 18px;font-size:15px;font-weight:bold;box-shadow:0 4px 16px rgba(0,0,0,.2);cursor:pointer;z-index:200;display:none}',
-    '.cart-fab.order-btn{right:150px}',
+    '.cart-fab{','  position:fixed !important;','  bottom:24px !important;','  right:20px !important;','  background:#06c755;','  color:#fff;','  border:none;','  border-radius:50px;','  padding:14px 18px;','  font-size:15px;','  font-weight:bold;','  box-shadow:0 4px 16px rgba(0,0,0,.2);','  cursor:pointer;','  z-index:99999 !important;','  display:flex !important;','  align-items:center;','  gap:4px;','}' ,'.fab-hidden{display:none !important;}',
+    '.cart-fab.order-btn{right:160px !important;}',
     '.badge{background:#e53935;color:#fff;border-radius:50%;font-size:11px;padding:2px 6px;margin-left:6px}',
     '.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;justify-content:center;align-items:flex-end}',
     '.modal.center{align-items:center}',
@@ -551,8 +551,8 @@ function orderPageHtml(liffId) {
     '<div class="tabs" id="storeTabs"></div>',
     '<div class="container" id="menuBox"><div id="loadingMsg">菜單載入中...</div></div>',
 
-    '<button class="cart-fab" id="cartFab" onclick="openCart()">🛒 購物車<span class="badge" id="cartBadge">0</span></button>',
-    '<button class="cart-fab order-btn" id="orderFab" onclick="openModal(\'myOrderModal\')">📋 我的訂單</button>',
+    '<button class="cart-fab fab-hidden" id="cartFab" onclick="openCart()">🛒 購物車<span class="badge" id="cartBadge">0</span></button>',
+    '<button class="cart-fab order-btn fab-hidden" id="orderFab" onclick="openModal(\'myOrderModal\')">📋 我的訂單</button>',
 
     // 選項 Modal
     '<div class="modal" id="optionModal"><div class="modal-box">',
@@ -626,8 +626,8 @@ function orderPageHtml(liffId) {
     '    liffReady=true;',
     '    document.getElementById("status").innerText="已登入："+profile.displayName;',
     '    enableButtons();',
-    '    document.getElementById("cartFab").style.display="";',
-    '    document.getElementById("orderFab").style.display="";',
+    '    document.getElementById("cartFab").classList.remove("fab-hidden");',
+    '    document.getElementById("orderFab").classList.remove("fab-hidden");',
     '    checkOrderStatus();',
     '    loadMyOrders();',
     '  }catch(err){',
