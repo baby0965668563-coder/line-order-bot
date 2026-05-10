@@ -12,7 +12,7 @@ const lineConfig = {
 };
 
 app.use('/webhook', line.middleware(lineConfig));
-app.use('/api', express.json())
+app.use(express.json());
 
 const client = new line.Client(lineConfig);
 const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
@@ -371,80 +371,81 @@ function cancelAutoClose() {
 // ────────────────────────────────────────────────────────────────
 //  文字訂單解析（原有保留）
 // ────────────────────────────────────────────────────────────────
-function clean(text) {
-  return String(text || '')
-    .replace(/[。.,，、!！?？:：;；"'（）()【】\[\]{}<>《》\s]/g, '')
-    .trim();
-}
+// ────────────────────────────────────────────────────────────────
+//  從 Orders Sheet 統計今日訂單（排除「已刪除」）
+// ────────────────────────────────────────────────────────────────
 
-function parseOrders(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  let currentItem = '', currentPrice = 0, pendingOrder = null, itemBuffer = '';
-  const priceMap = {}, itemCount = {}, userTotal = {};
+/**
+ * 統計報表（LINE 用）
+ * 品項數量 / 每人金額 / 未付款名單 / 總金額
+ */
+async function buildStatReport() {
+  const orders = await getAllOrdersToday();
+  const active = orders.filter(o => o.status !== '已刪除');
+  if (active.length === 0) return '📊 今日尚無訂單';
 
-  function cleanItemName(t) { return clean(t).replace(/\d+顆/g, ''); }
-  function add(item, price, name, qty = 1, note = '') {
-    item = cleanItemName(item); name = clean(name);
-    if (!item || !name || !qty) return;
-    const finalItem = note ? item + '（' + note + '）' : item;
-    itemCount[finalItem] = (itemCount[finalItem] || 0) + qty;
-    userTotal[name]      = (userTotal[name]      || 0) + price * qty;
+  const itemCount = {};   // { '品項（規格）': qty }
+  const userTotal = {};   // { name: total }
+  const unpaidSet = new Set();
+
+  for (const o of active) {
+    const key  = o.item + (o.spec ? '（' + o.spec + '）' : '');
+    itemCount[key] = (itemCount[key] || 0) + o.qty;
+
+    const name = o.name || o.userId || '未知';
+    userTotal[name] = (userTotal[name] || 0) + o.total;
+
+    if (o.status === '未付款') unpaidSet.add(name);
   }
-  function getPrice(rawQty) {
-    if (priceMap[rawQty] !== undefined) return priceMap[rawQty];
-    if (rawQty === '半' && priceMap['0.5'] !== undefined) return priceMap['0.5'];
-    return currentPrice;
-  }
 
-  for (const line of lines) {
-    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
-    const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (priceTable) { priceMap[priceTable[1]] = Number(priceTable[2]); continue; }
-    if (pendingOrder && !/[+*]/.test(line) && !/\d/.test(line)) {
-      add(pendingOrder.item, pendingOrder.price, line, 1); pendingOrder = null; continue;
-    }
-    const orderMatch = line.match(/^(.+?)[+*]\s*(半|0\.5|\d+)(.*)$/);
-    if (orderMatch && currentItem) {
-      const nm = orderMatch[1], rawQty = orderMatch[2], extra = orderMatch[3] || '';
-      add(currentItem, getPrice(rawQty), nm, rawQty === '半' || rawQty === '0.5' ? 1 : Number(rawQty), extra.includes('辣') ? '辣' : '');
-      continue;
-    }
-    const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
-    if (inlineSymbol) { add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1); itemBuffer = ''; continue; }
-    const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (itemSymbol) { currentItem = itemSymbol[1]; currentPrice = Number(itemSymbol[2]); itemBuffer = ''; continue; }
-    const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
-    if (inlineNoSymbol && !/[+*]/.test(line)) { add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1); itemBuffer = ''; continue; }
-    const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
-    if (noSymbolNoName && !/[+*]/.test(line) && !/顆/.test(line)) { pendingOrder = { item: noSymbolNoName[1], price: Number(noSymbolNoName[2]) }; itemBuffer = ''; continue; }
-    const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
-    if (priceNameOnly && itemBuffer) { add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1); itemBuffer = ''; continue; }
-    const priceOnly = line.match(/^(\d{2,5})$/);
-    if (priceOnly && itemBuffer) { pendingOrder = { item: itemBuffer, price: Number(priceOnly[1]) }; itemBuffer = ''; continue; }
-    if (!/[+*]/.test(line)) {
-      if (/顆/.test(line)) { currentItem = line; currentPrice = 0; itemBuffer = line; continue; }
-      if (currentItem) { add(currentItem, currentPrice, line, 1); continue; }
-      currentItem = line; currentPrice = 0; itemBuffer = line; continue;
-    }
-  }
-  return { itemCount, userTotal };
-}
+  const grandTotal = Object.values(userTotal).reduce((a, b) => a + b, 0);
 
-function formatResult(itemCount, userTotal) {
-  let text = '📊 訂餐統計\n\n【品項數量】\n';
-  for (const item in itemCount) if (itemCount[item] > 0) text += item + ' x' + itemCount[item] + '\n';
+  let text = '📊 今日訂餐統計\n';
+  text += '─────────────\n';
+  text += '【品項數量】\n';
+  for (const k in itemCount) text += k + ' x' + itemCount[k] + '\n';
+
   text += '\n【個人金額】\n';
-  for (const user in userTotal) text += user + '：$' + userTotal[user] + '\n';
-  text += '\n💰 總金額：$' + Object.values(userTotal).reduce((a, b) => a + b, 0);
+  for (const name in userTotal) text += name + '：$' + userTotal[name] + '\n';
+
+  text += '\n💰 總金額：$' + grandTotal;
+
+  if (unpaidSet.size > 0) {
+    text += '\n\n⚠️ 未付款：' + [...unpaidSet].join('、');
+  } else {
+    text += '\n\n✅ 所有人已付款';
+  }
+
   return text;
 }
 
-function formatShopOrder(itemCount, userTotal) {
-  let out = '您好，今天訂購如下：\n\n', totalCount = 0;
-  for (const item in itemCount) {
-    if (itemCount[item] > 0) { out += item + ' x' + itemCount[item] + '\n'; totalCount += itemCount[item]; }
+/**
+ * 店家單（LINE 用）
+ * 品項＋規格合併數量
+ */
+async function buildShopOrder() {
+  const orders = await getAllOrdersToday();
+  const active = orders.filter(o => o.status !== '已刪除');
+  if (active.length === 0) return '今日尚無訂單';
+
+  const itemCount = {};
+  for (const o of active) {
+    const key = o.item + (o.spec ? '（' + o.spec + '）' : '');
+    itemCount[key] = (itemCount[key] || 0) + o.qty;
   }
-  return out + '\n總數：' + totalCount + '份\n總金額：' + Object.values(userTotal).reduce((a, b) => a + b, 0) + '元\n\n麻煩您，謝謝～';
+
+  let out = '您好，今天訂購如下：\n\n';
+  let totalCount = 0;
+  for (const k in itemCount) {
+    out += k + ' x' + itemCount[k] + '\n';
+    totalCount += itemCount[k];
+  }
+
+  const totalMoney = active.reduce((a, o) => a + o.total, 0);
+  out += '\n總數：' + totalCount + '份';
+  out += '\n總金額：' + totalMoney + '元';
+  out += '\n\n麻煩您，謝謝～';
+  return out;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1287,22 +1288,20 @@ app.post('/webhook', async (req, res) => {
 
     if (text === '結單' || text === '收單' || text === '統計') {
       if (!isAdmin(userId)) { await reply('只有管理員可以結單 / 統計'); return res.sendStatus(200); }
-      const result = parseOrders(allText);
       isOpen = false; cancelAutoClose();
-      await reply(formatResult(result.itemCount, result.userTotal));
+      await reply(await buildStatReport());
       return res.sendStatus(200);
     }
 
     if (text === '店家單') {
       if (!isAdmin(userId)) { await reply('只有管理員可以查看店家單'); return res.sendStatus(200); }
-      const result = parseOrders(allText);
-      await reply(formatShopOrder(result.itemCount, result.userTotal));
+      await reply(await buildShopOrder());
       return res.sendStatus(200);
     }
 
     if (text === '清空') {
       if (!isAdmin(userId)) { await reply('只有管理員可以清空'); return res.sendStatus(200); }
-      allText = ''; isOpen = false; cancelAutoClose();
+      isOpen = false; cancelAutoClose();
       await reply('已清空訂單');
       return res.sendStatus(200);
     }
@@ -1321,7 +1320,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    if (isOpen) { allText += '\n' + text; }
+    // allText 已廢棄，訂單統一從 Orders Sheet 讀取
 
     return res.sendStatus(200);
   } catch (error) {
