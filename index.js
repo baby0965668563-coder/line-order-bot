@@ -1004,114 +1004,196 @@ function buildAdminPage() {
   const L = [];
   const p = s => L.push(s);
 
+  /* ── HEAD ────────────────────────────────────────────────── */
   p('<!DOCTYPE html><html lang="zh-TW"><head>');
   p('<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">');
   p('<title>訂餐管理後台</title>');
   p('<style>');
-  p(':root{--g:#06c755;--r:#e53935;--o:#f57c00;--bg:#f4f4f8;--card:#fff;--bdr:#e8e8ef;--txt:#1a1a2e;--sub:#888}');
+  p(':root{--g:#06c755;--gd:#05a847;--r:#e53935;--o:#f57c00;--b:#2563eb;--bg:#f1f5f9;--card:#fff;--bdr:#e2e8f0;--txt:#0f172a;--sub:#64748b;--sh:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.04)}');
   p('*{box-sizing:border-box;margin:0;padding:0}');
-  p('body{font-family:-apple-system,Arial,"Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--txt)}');
-  p('.hd{background:#1a1a2e;color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}');
-  p('.hd h1{font-size:18px;font-weight:800}');
-  p('.hd-time{font-size:12px;opacity:.6}');
-  p('.wrap{padding:14px;max-width:1000px;margin:0 auto}');
-  p('.card{background:var(--card);border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.07)}');
-  p('.card h3{font-size:15px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}');
-  p('.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:4px}');
-  p('.sbox{background:var(--bg);border-radius:10px;padding:12px 14px}');
-  p('.snum{font-size:24px;font-weight:800;margin-bottom:2px}');
-  p('.slbl{font-size:11px;color:var(--sub)}');
-  p('.sbox.g .snum{color:var(--g)}.sbox.r .snum{color:var(--r)}.sbox.o .snum{color:var(--o)}');
-  p('.crow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}');
-  p('.sdot{width:10px;height:10px;border-radius:50%;background:var(--sub);flex-shrink:0}');
-  p('.sdot.on{background:var(--g)}');
-  p('.stxt{font-size:14px;font-weight:700}');
+  p('body{font-family:-apple-system,Arial,"Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}');
+
+  /* header */
+  p('.hd{background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.2)}');
+  p('.hd-left{display:flex;align-items:center;gap:10px}');
+  p('.hd-icon{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#06c755,#00a846);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}');
+  p('.hd h1{font-size:17px;font-weight:800;letter-spacing:-.3px}');
+  p('.hd-sub{font-size:11px;opacity:.5;margin-top:1px}');
+  p('.hd-time{font-size:11px;opacity:.5;white-space:nowrap}');
+
+  /* layout */
+  p('.wrap{padding:16px;max-width:1080px;margin:0 auto}');
+  p('.section{margin-bottom:16px}');
+  p('.section-title{font-size:12px;font-weight:700;color:var(--sub);letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px;padding-left:2px}');
+  p('.card{background:var(--card);border-radius:16px;padding:18px;box-shadow:var(--sh);border:1px solid var(--bdr)}');
+  p('.card+.card{margin-top:12px}');
+
+  /* stat grid */
+  p('.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}');
+  p('.stat-grid.six{grid-template-columns:repeat(3,1fr)}');
+  p('@media(min-width:600px){.stat-grid.six{grid-template-columns:repeat(6,1fr)}}');
+  p('.sbox{border-radius:12px;padding:13px 14px;border:1px solid var(--bdr);background:var(--card)}');
+  p('.sbox.hi{border-color:transparent}');
+  p('.sbox.g{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#bbf7d0}');
+  p('.sbox.r{background:linear-gradient(135deg,#fff1f2,#fee2e2);border-color:#fecaca}');
+  p('.sbox.o{background:linear-gradient(135deg,#fffbeb,#fef3c7);border-color:#fde68a}');
+  p('.sbox.b{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#bfdbfe}');
+  p('.snum{font-size:22px;font-weight:800;letter-spacing:-.5px;margin-bottom:2px;line-height:1}');
+  p('.sbox.g .snum{color:#15803d}.sbox.r .snum{color:#be123c}.sbox.o .snum{color:#b45309}.sbox.b .snum{color:#1d4ed8}');
+  p('.slbl{font-size:11px;color:var(--sub);font-weight:500}');
+
+  /* control area */
+  p('.ctrl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}');
+  p('.status-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:13px;font-weight:700}');
+  p('.status-pill.on{background:#dcfce7;color:#15803d}');
+  p('.status-pill.off{background:#fee2e2;color:#be123c}');
+  p('.dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}');
+  p('.ac-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr)}');
   p('.ac-info{font-size:12px;color:var(--r);font-weight:700}');
-  p('.btn{padding:8px 14px;border:none;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}');
-  p('.btn.g{background:var(--g);color:#fff}.btn.r{background:var(--r);color:#fff}.btn.o{background:var(--o);color:#fff}');
-  p('.btn.out{background:var(--card);border:1.5px solid var(--bdr);color:var(--txt)}.btn.sm{padding:5px 10px;font-size:12px}');
-  p('.btn:hover{opacity:.85}');
-  p('input[type=number],input[type=date],select.sel{padding:7px 10px;border-radius:8px;border:1.5px solid var(--bdr);font-size:13px;background:var(--card)}');
-  p('input[type=number]{width:64px}');
-  p('.srch{width:100%;padding:9px 14px;border-radius:999px;border:1.5px solid var(--bdr);font-size:13px;margin-bottom:10px;background:var(--card)}');
-  p('.tbl-w{overflow-x:auto}');
+
+  /* buttons */
+  p('.btn{padding:8px 16px;border:none;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s,transform .1s;display:inline-flex;align-items:center;gap:5px}');
+  p('.btn:active{transform:scale(.96)}');
+  p('.btn.g{background:var(--g);color:#fff}');
+  p('.btn.r{background:var(--r);color:#fff}');
+  p('.btn.o{background:var(--o);color:#fff}');
+  p('.btn.b{background:var(--b);color:#fff}');
+  p('.btn.ghost{background:var(--card);border:1.5px solid var(--bdr);color:var(--txt)}');
+  p('.btn.sm{padding:5px 12px;font-size:12px}');
+  p('.btn:hover{opacity:.88}');
+
+  /* form controls */
+  p('input[type=number],input[type=date],select.sel{padding:7px 11px;border-radius:8px;border:1.5px solid var(--bdr);font-size:13px;background:var(--card);color:var(--txt);font-family:inherit}');
+  p('input[type=number]{width:68px}');
+  p('input[type=date]{color:var(--txt)}');
+
+  /* toolbar */
+  p('.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}');
+  p('.srch{flex:1;min-width:160px;padding:8px 14px 8px 34px;border-radius:999px;border:1.5px solid var(--bdr);font-size:13px;background:var(--card);outline:none;font-family:inherit;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'14\' height=\'14\' fill=\'%2394a3b8\' viewBox=\'0 0 16 16\'%3E%3Cpath d=\'M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.415l-3.868-3.833zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:11px center}');
+  p('.srch:focus{border-color:var(--g);outline:none}');
+  p('.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}');
+  p('.filter-label{font-size:12px;font-weight:600;color:var(--sub)}');
+
+  /* table */
+  p('.tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--bdr)}');
   p('table{width:100%;border-collapse:collapse;font-size:13px}');
-  p('th{padding:9px 8px;border-bottom:2px solid var(--bdr);text-align:left;font-weight:700;color:var(--sub);white-space:nowrap;background:var(--bg)}');
-  p('td{padding:8px;border-bottom:1px solid var(--bdr);vertical-align:middle}');
-  p('tr:hover td{background:#f8f8fc}');
-  p('.sbadge{display:inline-block;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:700;background:#e3f2fd;color:#1565c0}');
-  p('.tag-p{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:#e8f5e9;color:#2e7d32}');
-  p('.tag-u{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:#fff3e0;color:#e65100}');
-  p('.tag-d{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;background:#fce4ec;color:#b71c1c}');
-  p('.gsec{margin-bottom:18px}');
-  p('.gttl{font-size:14px;font-weight:800;padding:8px 10px;background:var(--bg);border-radius:8px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between}');
-  p('.gsub{font-size:12px;color:var(--sub)}');
-  p('@media(max-width:600px){th,td{padding:6px 5px;font-size:12px}.stats{grid-template-columns:repeat(2,1fr)}}');
+  p('thead{position:sticky;top:0;z-index:1}');
+  p('th{padding:10px 10px;border-bottom:1px solid var(--bdr);text-align:left;font-weight:700;font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--sub);background:#f8fafc;white-space:nowrap}');
+  p('td{padding:10px 10px;border-bottom:1px solid var(--bdr);vertical-align:middle}');
+  p('tr:last-child td{border-bottom:0}');
+  p('tr:hover td{background:#f8fafc}');
+
+  /* badges / tags */
+  p('.store-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#dbeafe;color:#1e40af;white-space:nowrap}');
+  p('.tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}');
+  p('.tag.p{background:#dcfce7;color:#15803d}');
+  p('.tag.u{background:#fef3c7;color:#b45309}');
+  p('.tag.d{background:#fee2e2;color:#be123c}');
+
+  /* group section */
+  p('.grp{margin-bottom:16px}');
+  p('.grp-hd{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg);border-radius:10px;margin-bottom:6px;border:1px solid var(--bdr)}');
+  p('.grp-name{font-size:14px;font-weight:800;display:flex;align-items:center;gap:7px}');
+  p('.grp-meta{font-size:12px;color:var(--sub);display:flex;align-items:center;gap:10px}');
+  p('.grp-meta strong{color:var(--txt);font-weight:700}');
+
+  /* pay select */
+  p('.pay-sel{padding:4px 8px;border-radius:7px;border:1.5px solid var(--bdr);font-size:11px;background:var(--card);color:var(--txt);cursor:pointer;font-family:inherit}');
+
+  /* empty / loading */
+  p('.placeholder{text-align:center;padding:32px;color:var(--sub);font-size:13px}');
+
+  /* responsive */
+  p('@media(max-width:640px){th,td{padding:8px 7px;font-size:12px}.stat-grid{grid-template-columns:repeat(2,1fr)}.stat-grid.six{grid-template-columns:repeat(2,1fr)}}');
   p('</style></head><body>');
 
-  p('<div class="hd"><h1>🍱 訂餐管理後台</h1><span class="hd-time" id="hdT"></span></div>');
+  /* ── HEADER ──────────────────────────────────────────────── */
+  p('<div class="hd">');
+  p('  <div class="hd-left">');
+  p('    <div class="hd-icon">🍱</div>');
+  p('    <div><div class="hd h1" style="font-size:17px;font-weight:800">訂餐管理後台</div><div class="hd-sub" id="hdSub">載入中...</div></div>');
+  p('  </div>');
+  p('  <div class="hd-time" id="hdT"></div>');
+  p('</div>');
   p('<div class="wrap">');
 
-  /* 開單控制 */
-  p('<div class="card"><h3>📢 開單控制</h3>');
-  p('<div class="crow">');
-  p('  <span class="sdot" id="sDot"></span><span class="stxt" id="sTxt"></span>');
-  p('  <button class="btn g" onclick="doOpen()">開單</button>');
-  p('  <button class="btn r" onclick="doClose()">結單</button>');
-  p('  <button class="btn o" onclick="doClear()">清空</button>');
-  p('</div>');
-  p('<div class="crow" style="margin-top:4px">');
-  p('  <span style="font-size:13px;font-weight:600">自動結單：</span>');
-  p('  <input type="number" id="acMin" value="30" min="1" max="480"> 分鐘');
-  p('  <button class="btn out" onclick="doAc()">設定</button>');
-  p('  <button class="btn out" onclick="doCancelAc()">取消</button>');
-  p('  <span class="ac-info" id="acInfo"></span>');
+  /* ── 開單控制 ──────────────────────────────────────────────── */
+  p('<div class="section">');
+  p('<div class="section-title">開單控制</div>');
+  p('<div class="card">');
+  p('  <div class="ctrl-row">');
+  p('    <span class="status-pill off" id="sPill"><span class="dot"></span><span id="sTxt">已結單</span></span>');
+  p('    <button class="btn g" onclick="doOpen()">▶ 開單</button>');
+  p('    <button class="btn r" onclick="doClose()">■ 結單</button>');
+  p('    <button class="btn ghost" onclick="doClear()">清空狀態</button>');
+  p('  </div>');
+  p('  <div class="ac-row">');
+  p('    <span class="filter-label">自動結單</span>');
+  p('    <input type="number" id="acMin" value="30" min="1" max="480"> 分鐘後');
+  p('    <button class="btn ghost sm" onclick="doAc()">設定</button>');
+  p('    <button class="btn ghost sm" onclick="doCancelAc()">取消</button>');
+  p('    <span class="ac-info" id="acInfo"></span>');
+  p('  </div>');
   p('</div></div>');
 
-  /* 統計 */
-  p('<div class="card"><h3>📊 今日統計</h3><div class="stats" id="statsEl">載入中...</div></div>');
+  /* ── 今日統計 ──────────────────────────────────────────────── */
+  p('<div class="section">');
+  p('<div class="section-title">今日統計</div>');
+  p('<div class="stat-grid six" id="statsEl">');
+  p('  <div class="sbox"><div class="snum">—</div><div class="slbl">載入中</div></div>');
+  p('</div></div>');
 
-  /* 訂單列表 */
-  p('<div class="card"><h3>📋 訂單列表');
-  p('  <div style="display:flex;gap:6px;flex-wrap:wrap">');
+  /* ── 訂單列表 ──────────────────────────────────────────────── */
+  p('<div class="section">');
+  p('<div class="section-title">訂單列表</div>');
+  p('<div class="card">');
+
+  /* toolbar */
+  p('  <div class="toolbar">');
+  p('    <input class="srch" id="srch" placeholder="搜尋姓名、品項..." oninput="renderTable()">');
   p('    <button class="btn g sm" onclick="doBatchPaid()">✅ 全標已付</button>');
-  p('    <button class="btn out sm" onclick="loadOrders()">🔄 重整</button>');
-  p('    <button class="btn out sm" onclick="copyShop()">📋 複製店家單</button>');
+  p('    <button class="btn b sm" onclick="copyShop()">📋 複製店家單</button>');
+  p('    <button class="btn ghost sm" onclick="loadOrders()">↺ 重整</button>');
   p('  </div>');
-  p('</h3>');
-  p('<div class="crow">');
-  p('  <span style="font-size:13px;font-weight:600">日期：</span>');
-  p('  <input type="date" id="dateF" onchange="loadOrders()">');
-  p('  <button class="btn out sm" onclick="document.getElementById(\'dateF\').value=\'\';loadOrders()">今日</button>');
-  p('  <span style="font-size:13px;font-weight:600;margin-left:8px">分組：</span>');
-  p('  <select class="sel" id="gbSel" onchange="renderTable()">');
-  p('    <option value="none">不分組</option>');
-  p('    <option value="store" selected>依店家</option>');
-  p('    <option value="person">依人員</option>');
-  p('  </select>');
-  p('</div>');
-  p('<input class="srch" id="srch" placeholder="搜尋姓名、品項..." oninput="renderTable()">');
-  p('<div id="ordersEl"></div>');
-  p('</div>');
 
+  /* filter row */
+  p('  <div class="filter-row">');
+  p('    <span class="filter-label">日期</span>');
+  p('    <input type="date" id="dateF" onchange="loadOrders()">');
+  p('    <button class="btn ghost sm" onclick="document.getElementById(\'dateF\').value=\'\';loadOrders()">今日</button>');
+  p('    <span class="filter-label" style="margin-left:6px">分組</span>');
+  p('    <select class="sel" id="gbSel" onchange="renderTable()">');
+  p('      <option value="store" selected>依店家</option>');
+  p('      <option value="person">依人員</option>');
+  p('      <option value="none">不分組</option>');
+  p('    </select>');
+  p('  </div>');
+
+  p('  <div id="ordersEl"><div class="placeholder">載入中...</div></div>');
+  p('</div></div>');
   p('</div>'); /* .wrap */
 
-  /* Admin JS */
+  /* ── SCRIPT ──────────────────────────────────────────────── */
   p('<script>');
   p('var TOKEN=(location.search.match(/[?&]token=([^&]*)/)||[])[1]||"";');
   p('var cache=[],acAt=null,acTimer=null;');
   p('document.getElementById("hdT").textContent=new Date().toLocaleString("zh-TW");');
 
+  /* api helper */
   p('async function api(path,method,body){');
   p('  var o={method:method||"GET",headers:{"Content-Type":"application/json","x-admin-token":TOKEN}};');
   p('  if(body!==undefined)o.body=JSON.stringify(body);');
   p('  return (await fetch(path,o)).json();');
   p('}');
 
+  /* status */
   p('async function loadStatus(){');
   p('  var d=await api("/api/status");');
-  p('  document.getElementById("sDot").className="sdot"+(d.isOpen?" on":"");');
-  p('  document.getElementById("sTxt").textContent=d.isOpen?"開單中":"已結單";');
+  p('  var pill=document.getElementById("sPill");');
+  p('  var txt=document.getElementById("sTxt");');
+  p('  var sub=document.getElementById("hdSub");');
+  p('  if(d.isOpen){pill.className="status-pill on";txt.textContent="開單中";sub.textContent="目前開放點餐";}');
+  p('  else{pill.className="status-pill off";txt.textContent="已結單";sub.textContent="目前未開放";}');
   p('  if(d.autoCloseAt){acAt=d.autoCloseAt;startAcCd();}');
   p('  else{acAt=null;document.getElementById("acInfo").textContent="";}');
   p('}');
@@ -1122,25 +1204,28 @@ function buildAdminPage() {
   p('    if(!acAt){clearInterval(acTimer);return;}');
   p('    var diff=new Date(acAt)-new Date();');
   p('    if(diff<=0){document.getElementById("acInfo").textContent="已自動結單";clearInterval(acTimer);loadStatus();return;}');
-  p('    document.getElementById("acInfo").textContent="⏰ "+Math.floor(diff/60000)+"分"+Math.floor((diff%60000)/1000)+"秒";');
+  p('    document.getElementById("acInfo").textContent="⏰ "+Math.floor(diff/60000)+"分"+Math.floor((diff%60000)/1000)+"秒後自動結單";');
   p('  },1000);');
   p('}');
 
+  /* open / close / clear */
   p('async function doOpen(){await api("/api/admin/open","POST",{});loadStatus();loadOrders();}');
   p('async function doClose(){await api("/api/admin/close","POST",{});loadStatus();loadOrders();}');
   p('async function doClear(){if(!confirm("確定清空狀態？"))return;await api("/api/admin/clear","POST",{});loadStatus();loadOrders();}');
   p('async function doAc(){var m=Number(document.getElementById("acMin").value)||30;await api("/api/admin/auto-close","POST",{minutes:m});loadStatus();}');
   p('async function doCancelAc(){await api("/api/admin/cancel-auto-close","POST",{});acAt=null;document.getElementById("acInfo").textContent="";clearInterval(acTimer);}');
 
+  /* load orders */
   p('async function loadOrders(){');
+  p('  document.getElementById("ordersEl").innerHTML=\'<div class="placeholder">載入中...</div>\';');
   p('  var date=document.getElementById("dateF").value;');
-  p('  var url="/api/admin/orders"+(date?"?date="+date:"");');
-  p('  var d=await api(url);');
+  p('  var d=await api("/api/admin/orders"+(date?"?date="+date:""));');
   p('  cache=Array.isArray(d)?d:[];');
   p('  renderStats(cache);');
   p('  renderTable();');
   p('}');
 
+  /* stats */
   p('function renderStats(o){');
   p('  var act=o.filter(function(x){return x.status!=="已刪除";});');
   p('  var paid=act.filter(function(x){return x.status==="已付款";});');
@@ -1148,76 +1233,112 @@ function buildAdminPage() {
   p('  var tot=act.reduce(function(a,x){return a+x.total;},0);');
   p('  var pM=paid.reduce(function(a,x){return a+x.total;},0);');
   p('  var uM=unpaid.reduce(function(a,x){return a+x.total;},0);');
-  // mkSb 定義在下方
   p('  document.getElementById("statsEl").innerHTML=');
-  p('    mkSb(act.length,"筆訂單","")+mkSb("$"+tot,"總金額","g")+mkSb("$"+pM,"已收款","g")+mkSb("$"+uM,"未收款","r")+mkSb(paid.length,"已付款","g")+mkSb(unpaid.length,"未付款","o");');
+  p('    sb(act.length,"筆訂單","")+sb("$"+tot,"總金額","b")+sb("$"+pM,"已收款","g")+sb("$"+uM,"待收款","r")+sb(paid.length,"已付款","g")+sb(unpaid.length,"未付款","o");');
   p('}');
-  p('function mkSb(n,l,cls){');
-  p('  return \'<div class="sbox\'+(cls?" "+cls:"")+\'"><div class="snum">\'+n+\'</div><div class="slbl">\'+l+\'</div></div>\';');
-  p('}');
+  p('function sb(n,l,cls){return \'<div class="sbox hi\'+(cls?" "+cls:"")+\'"><div class="snum">\'+n+\'</div><div class="slbl">\'+l+\'</div></div>\';}');
 
+  /* render table */
   p('function renderTable(){');
   p('  var q=(document.getElementById("srch").value||"").toLowerCase();');
   p('  var gb=document.getElementById("gbSel").value;');
-  p('  var data=cache.filter(function(o){return !q||(o.name||"").toLowerCase().indexOf(q)>=0||(o.item||"").toLowerCase().indexOf(q)>=0;});');
+  p('  var data=cache.filter(function(o){');
+  p('    return !q||(o.name||"").toLowerCase().indexOf(q)>=0||(o.item||"").toLowerCase().indexOf(q)>=0||(o.store||"").toLowerCase().indexOf(q)>=0;');
+  p('  });');
   p('  var el=document.getElementById("ordersEl");');
-  p('  if(!data.length){el.innerHTML=\'<div style="text-align:center;padding:24px;color:#aaa">無訂單</div>\';return;}');
-  p('  if(gb==="none"){el.innerHTML=mkTable(data);return;}');
+  p('  if(!data.length){el.innerHTML=\'<div class="placeholder">無符合訂單</div>\';return;}');
+  p('  if(gb==="none"){el.innerHTML=mkTbl(data);return;}');
   p('  var groups={};');
-  p('  data.forEach(function(o){var k=gb==="store"?(o.store||"其他"):(o.name||"未知");if(!groups[k])groups[k]=[];groups[k].push(o);});');
+  p('  data.forEach(function(o){');
+  p('    var k=gb==="store"?(o.store||"其他"):(o.name||"未知");');
+  p('    if(!groups[k])groups[k]=[];');
+  p('    groups[k].push(o);');
+  p('  });');
   p('  var html="";');
   p('  Object.keys(groups).forEach(function(gk){');
-  p('    var items=groups[gk];');
-  p('    var sub=items.filter(function(o){return o.status!=="已刪除";}).reduce(function(a,o){return a+o.total;},0);');
-  p('    html+=\'<div class="gsec"><div class="gttl"><span>\'+esc(gk)+\'</span><span class="gsub">小計 $\'+sub+\' / \'+items.length+\' 筆</span></div>\'+mkTable(items)+\'</div>\';');
+  p('    var rows=groups[gk];');
+  p('    var act=rows.filter(function(o){return o.status!=="已刪除";});');
+  p('    var tot=act.reduce(function(a,o){return a+o.total;},0);');
+  p('    var paidCnt=act.filter(function(o){return o.status==="已付款";}).length;');
+  p('    var unpaidCnt=act.filter(function(o){return o.status==="未付款";}).length;');
+  p('    html+=\'<div class="grp">\';');
+  p('    html+=\'<div class="grp-hd">\';');
+  p('    html+=\'<div class="grp-name"><span class="store-badge">\'+esc(gk)+\'</span></div>\';');
+  p('    html+=\'<div class="grp-meta">\';');
+  p('    html+=\'<span>合計 <strong>$\'+tot+\'</strong></span>\';');
+  p('    html+=\'<span>\'+act.length+\' 筆</span>\';');
+  p('    if(unpaidCnt)html+=\'<span style="color:var(--o)">\'+unpaidCnt+\' 待付</span>\';');
+  p('    if(paidCnt)html+=\'<span style="color:var(--g)">\'+paidCnt+\' 已付</span>\';');
+  p('    html+=\'</div></div>\';');
+  p('    html+=mkTbl(rows);');
+  p('    html+=\'</div>\';');
   p('  });');
   p('  el.innerHTML=html;');
   p('}');
 
-  p('function mkTable(rows){');
+  /* build table */
+  p('function mkTbl(rows){');
   p('  if(!rows.length)return "";');
-  p('  var h=\'<div class="tbl-w"><table><thead><tr>\'');
+  p('  var h=\'<div class="tbl-wrap"><table><thead><tr>\'');
   p('    +\'<th>姓名</th><th>店家</th><th>品項</th><th>規格</th><th>備註</th><th>數量</th><th>金額</th><th>狀態</th><th>操作</th>\'');
   p('    +\'</tr></thead><tbody>\';');
   p('  h+=rows.map(function(o){');
-  p('    var tc=o.status==="已付款"?"tag-p":o.status==="已刪除"?"tag-d":"tag-u";');
-  p('    var ops=o.status==="未付款"');
-  p('      ?\'<select class="sel" id="pt\'+o.rowIndex+\'" style="padding:4px 7px;font-size:11px">\'');
-  p('        +\'<option>現金</option><option>Line Pay</option><option>轉帳</option></select> \'');
-  p('        +\'<button class="btn g sm" onclick="doPaid(\'+o.rowIndex+\')">付款</button> \'');
-  p('        +\'<button class="btn r sm" onclick="doDelOrder(\'+o.rowIndex+\')">刪</button>\'');
-  p('      :"";');
+  p('    var tc=o.status==="已付款"?"p":o.status==="已刪除"?"d":"u";');
+  p('    var ops="";');
+  p('    if(o.status==="未付款"){');
+  p('      ops+=\'<select class="pay-sel" id="pt\'+o.rowIndex+\'"><option>現金</option><option>Line Pay</option><option>轉帳</option></select> \';');
+  p('      ops+=\'<button class="btn g sm" onclick="doPaid(\'+o.rowIndex+\')">付款</button> \';');
+  p('      ops+=\'<button class="btn r sm" onclick="doDelOrder(\'+o.rowIndex+\')">刪</button>\';');
+  p('    }');
   p('    return \'<tr>\'');
-  p('      +\'<td>\'+esc(o.name)+\'</td><td><span class="sbadge">\'+esc(o.store)+\'</span></td>\'');
-  p('      +\'<td>\'+esc(o.item)+\'</td><td style="color:var(--sub)">\'+esc(o.spec)+\'</td>\'');
-  p('      +\'<td style="color:var(--sub)">\'+esc(o.note)+\'</td><td>\'+o.qty+\'</td>\'');
-  p('      +\'<td style="font-weight:800">$\'+o.total+\'</td>\'');
-  p('      +\'<td><span class="\'+tc+\'">\'+esc(o.status)+\'</span></td>\'');
+  p('      +\'<td style="font-weight:600">\'+esc(o.name)+\'</td>\'');
+  p('      +\'<td><span class="store-badge">\'+esc(o.store)+\'</span></td>\'');
+  p('      +\'<td style="font-weight:600">\'+esc(o.item)+\'</td>\'');
+  p('      +\'<td style="color:var(--sub);font-size:12px">\'+esc(o.spec)+\'</td>\'');
+  p('      +\'<td style="color:var(--sub);font-size:12px">\'+esc(o.note)+\'</td>\'');
+  p('      +\'<td style="text-align:center">\'+o.qty+\'</td>\'');
+  p('      +\'<td style="font-weight:800;color:var(--g)">$\'+o.total+\'</td>\'');
+  p('      +\'<td><span class="tag \'+tc+\'">\'+esc(o.status)+\'</span></td>\'');
   p('      +\'<td>\'+ops+\'</td></tr>\';');
   p('  }).join("");');
   p('  h+="</tbody></table></div>";');
   p('  return h;');
   p('}');
 
-  p('async function doPaid(ri){var sel=document.getElementById("pt"+ri);await api("/api/admin/paid","POST",{rowIndex:ri,payType:sel?sel.value:"現金"});loadOrders();}');
+  /* actions */
+  p('async function doPaid(ri){');
+  p('  var sel=document.getElementById("pt"+ri);');
+  p('  await api("/api/admin/paid","POST",{rowIndex:ri,payType:sel?sel.value:"現金"});');
+  p('  loadOrders();');
+  p('}');
   p('async function doDelOrder(ri){if(!confirm("確定刪除？"))return;await api("/api/admin/delete-order","POST",{rowIndex:ri});loadOrders();}');
-  p('async function doBatchPaid(){if(!confirm("全部標記已付款？"))return;await api("/api/admin/batch-paid","POST",{payType:"現金"});loadOrders();}');
+  p('async function doBatchPaid(){if(!confirm("將所有未付款標記為已付款？"))return;await api("/api/admin/batch-paid","POST",{payType:"現金"});loadOrders();}');
 
+  /* copy shop order */
   p('function copyShop(){');
   p('  var act=cache.filter(function(o){return o.status!=="已刪除";});');
+  p('  if(!act.length){alert("今日無訂單");return;}');
   p('  var cnt={};');
   p('  act.forEach(function(o){var k=o.item+(o.spec?"（"+o.spec+"）":"");cnt[k]=(cnt[k]||0)+o.qty;});');
   p('  var txt="您好，今天訂購如下：\n\n",n=0;');
   p('  Object.keys(cnt).forEach(function(k){txt+=k+" x"+cnt[k]+"\n";n+=cnt[k];});');
   p('  var m=act.reduce(function(a,o){return a+o.total;},0);');
   p('  txt+="\n總數："+n+"份\n總金額："+m+"元\n\n麻煩您，謝謝～";');
-  p('  navigator.clipboard.writeText(txt).then(function(){alert("已複製");});');
+  p('  navigator.clipboard.writeText(txt).then(function(){');
+  p('    var btn=event.target;var orig=btn.textContent;');
+  p('    btn.textContent="✓ 已複製";btn.style.background="#15803d";');
+  p('    setTimeout(function(){btn.textContent=orig;btn.style.background="";},1800);');
+  p('  }).catch(function(){alert(txt);});');
   p('}');
 
+  /* esc */
   p('function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}');
 
-  p('loadStatus();loadOrders();');
-  p('setInterval(loadStatus,30000);setInterval(loadOrders,60000);');
+  /* init */
+  p('loadStatus();');
+  p('loadOrders();');
+  p('setInterval(loadStatus,30000);');
+  p('setInterval(loadOrders,60000);');
   p('</script></body></html>');
 
   return L.join('\n');
