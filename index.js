@@ -286,14 +286,35 @@ function scheduleAutoClose(minutes) {
   if (autoCloseTimer) clearTimeout(autoCloseTimer);
   const ms = Math.max(1, Number(minutes)) * 60 * 1000;
   autoCloseAt    = new Date(Date.now() + ms).toISOString();
-  autoCloseTimer = setTimeout(() => {
+
+  // 提前 5 分鐘推播提醒（只在時間 > 5 分鐘時）
+  if (ms > 5 * 60 * 1000) {
+    setTimeout(() => {
+      if (isOpen) pushToGroup('⏰ 距離收單還有 5 分鐘，請把握時間點餐！');
+    }, ms - 5 * 60 * 1000);
+  }
+
+  autoCloseTimer = setTimeout(async () => {
     isOpen = false; autoCloseAt = null; autoCloseTimer = null;
     console.log('[自動結單]', nowTW());
+    const stat = await buildStatReport().catch(() => '');
+    pushToGroup('🔴 已自動結單！\n\n' + stat);
   }, ms);
 }
 function cancelAutoClose() {
   if (autoCloseTimer) clearTimeout(autoCloseTimer);
   autoCloseTimer = null; autoCloseAt = null;
+}
+
+// ── 推播通知（需設定 LINE_GROUP_ID 環境變數）─────────────────────
+async function pushToGroup(text) {
+  const gid = process.env.LINE_GROUP_ID || '';
+  if (!gid) return;
+  try {
+    await client.pushMessage(gid, { type: 'text', text });
+  } catch(e) {
+    console.error('[push] fail:', e.message);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -688,7 +709,17 @@ function buildOrderPage(liffId) {
   p('    else{el.textContent="未開放";el.className="hd-badge closed";}');
   p('    if(d.autoCloseAt)startCd(d.autoCloseAt);');
   p('    else document.getElementById("hdCd").textContent="";');
+  p('    updateOrderBtns(d.isOpen);');
   p('  }catch(e){}');
+  p('}');
+
+  p('function updateOrderBtns(open){');
+  p('  menu.forEach(function(_,i){');
+  p('    var b=document.getElementById("btn"+i);');
+  p('    if(!b)return;');
+  p('    if(open){b.disabled=false;b.textContent="加入購物車";}');
+  p('    else{b.disabled=true;b.textContent="未開放點餐";}');
+  p('  });');
   p('}');
 
   /* startCd */
@@ -884,6 +915,12 @@ function buildOrderPage(liffId) {
 
   p('async function submitCart(){');
   p('  if(!cart.length){alert("購物車是空的");return;}');
+  p('  // 送單前確認是否仍開放點餐');
+  p('  try{');
+  p('    var sr=await fetch("/api/status");');
+  p('    var sd=await sr.json();');
+  p('    if(!sd.isOpen){alert("目前未開放點餐，無法送出訂單。");return;}');
+  p('  }catch(e){}');
   p('  var btn=document.getElementById("submitBtn");');
   p('  btn.disabled=true;btn.textContent="送出中...";');
   p('  for(var i=0;i<cart.length;i++){');
@@ -1437,20 +1474,26 @@ app.post('/webhook', async (req, res) => {
       if (!isAdmin(uid)) { await reply('只有管理員可以開單'); return res.sendStatus(200); }
       isOpen = true;
       scheduleAutoClose(Number(autoOpen[1]));
-      await reply('已開單！將於 '+autoOpen[1]+' 分鐘後自動結單\n點餐頁：'+(process.env.LIFF_URL||''));
+      const autoMsg = '🟢 開始點餐！\n點餐頁：'+(process.env.LIFF_URL||'')+'\n⏰ 將於 '+autoOpen[1]+' 分鐘後自動結單';
+      await reply(autoMsg);
+      pushToGroup(autoMsg);
       return res.sendStatus(200);
     }
     if (text === '開單') {
       if (!isAdmin(uid)) { await reply('只有管理員可以開單'); return res.sendStatus(200); }
       if (isOpen) { await reply('目前已開單中'); return res.sendStatus(200); }
       isOpen = true;
-      await reply('已開單，可以開始點餐 🍱\n點餐頁：'+(process.env.LIFF_URL||''));
+      const openMsg = '🟢 開始點餐！\n點餐頁：'+(process.env.LIFF_URL||'');
+      await reply(openMsg);
+      pushToGroup(openMsg);
       return res.sendStatus(200);
     }
     if (text === '結單' || text === '收單' || text === '統計') {
       if (!isAdmin(uid)) { await reply('只有管理員可以結單/統計'); return res.sendStatus(200); }
       isOpen = false; cancelAutoClose();
-      await reply(await buildStatReport());
+      const stat = await buildStatReport();
+      await reply(stat);
+      pushToGroup('🔴 已收單！\n\n' + stat);
       return res.sendStatus(200);
     }
     if (text === '店家單') {
