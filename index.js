@@ -945,23 +945,62 @@ function buildOrderPage(liffId) {
   /* cart */
   p('function updBadge(){document.getElementById("cartBadge").textContent=cart.reduce(function(a,c){return a+c.qty;},0);}');
 
-  p('function renderCart(){');
-  p('  var el=document.getElementById("cartList");');
-  p('  var te=document.getElementById("cartTotal");');
-  p('  if(!cart.length){el.innerHTML=\'<div class="empty" style="padding:20px 0">購物車是空的</div>\';te.textContent="";return;}');
-  p('  el.innerHTML=cart.map(function(c,i){');
-  p('    var sub=[c.spec,c.note].filter(Boolean).join("｜");');
-  p('    return \'<div class="orow">\'');
-  p('      +\'<div class="oinfo"><div class="oname">\'+escH(c.item)+\' x\'+c.qty+\'</div>\'');
-  p('      +(sub?\'<div class="osub">\'+escH(sub)+\'</div>\':"")');
-  p('      +\'</div>\'');
-  p('      +\'<div class="oact"><div class="oprice">$\'+(c.price*c.qty)+\'</div>\'');
-  p('      +\'<button class="btn-del" onclick="removeCart(\'+i+\')">移除</button></div></div>\';');
-  p('  }).join("");');
-  p('  te.textContent="合計：$"+cart.reduce(function(a,c){return a+c.price*c.qty;},0);');
-  p('}');
+ p('function renderCart(){');
+p('  var el=document.getElementById("cartList");');
+p('  var te=document.getElementById("cartTotal");');
+
+p('  if(!cart.length){');
+p('    el.innerHTML=\'<div class="empty" style="padding:20px 0">購物車是空的</div>\';');
+p('    te.textContent="";');
+p('    return;');
+p('  }');
+
+p('  el.innerHTML=cart.map(function(c,i){');
+
+p('    var sub=[c.spec,c.note].filter(Boolean).join("｜");');
+
+p('    return \'<div class="orow">\'');
+
+p('      +\'<div class="oinfo"><div class="oname">\'+escH(c.item)+\' x\'+c.qty+\'</div>\'');
+
+p('      +(sub?\'<div class="osub">\'+escH(sub)+\'</div>\':"")');
+
+p('      +\'</div>\'');
+
+p('      +\'<div class="oact"><div class="oprice">$\'+(c.price*c.qty)+\'</div>\'');
+
+p('      +\'<div class="qty-inline">\'');
+
+p('      +\'<button onclick="changeCartQty(\'+i+\',-1)">−</button>\'');
+
+p('      +\'<span>\'+c.qty+\'</span>\'');
+
+p('      +\'<button onclick="changeCartQty(\'+i+\',1)">＋</button>\'');
+
+p('      +\'</div>\'');
+
+p('      +\'<button class="btn-del" onclick="removeCart(\'+i+\')">移除</button></div></div>\';');
+
+p('  }).join("");');
+
+p('  te.textContent="合計：$"+cart.reduce(function(a,c){');
+p('    return a+c.price*c.qty;');
+p('  },0);');
+
+p('}');
 
   p('function removeCart(i){cart.splice(i,1);updBadge();renderCart();}');
+  p('function changeCartQty(i,d){');
+
+p('  if(!cart[i]) return;');
+
+p('  cart[i].qty=Math.max(1,Math.min(20,Number(cart[i].qty||1)+d));');
+
+p('  updBadge();');
+
+p('  renderCart();');
+
+p('}');
 
   p('async function submitCart(){');
   p('  if(!cart.length){alert("購物車是空的");return;}');
