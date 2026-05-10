@@ -1202,6 +1202,7 @@ function buildAdminPage() {
   p('    <button class="btn g sm" onclick="doBatchPaid()">✅ 全標已付</button>');
   p('    <button class="btn b sm" onclick="copyShop()">📋 複製店家單</button>');
   p('    <button class="btn ghost sm" onclick="loadOrders()">↺ 重整</button>');
+  p('    <button class="btn r sm" onclick="doClearToday()">🗑 清空今日訂單</button>');
   p('  </div>');
 
   /* filter row */
