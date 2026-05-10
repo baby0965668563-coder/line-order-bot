@@ -189,6 +189,30 @@ async function deleteOrder(userId, rowIndex) {
   } catch(e) { return false; }
 }
 
+async function updateOrderQty(userId, rowIndex, qty) {
+  try {
+    await authSheet();
+    const s = doc.sheetsByTitle['Orders'];
+    if (!s) return false;
+    const rows = await s.getRows();
+    const t = rows.find(r =>
+      Number(r.rowIndex) === Number(rowIndex) &&
+      String(r['userId'] || '') === String(userId) &&
+      String(r['狀態'] || '') === '未付款'
+    );
+    if (!t) return false;
+    const q     = Math.min(20, Math.max(1, Number(qty) || 1));
+    const price = Number(t['單價'] || 0);
+    t['數量'] = q;
+    t['總價'] = price * q;
+    await t.save();
+    return true;
+  } catch(e) {
+    console.error('updateOrderQty fail:', e.message);
+    return false;
+  }
+}
+
 async function updateOrderNote(userId, rowIndex, note) {
   try {
     await authSheet();
@@ -425,6 +449,12 @@ app.delete('/api/order/:ri', async (req, res) => {
   res.json({ success: await deleteOrder(userId, Number(req.params.ri)) });
 });
 
+app.patch('/api/order/:ri/qty', async (req, res) => {
+  const { userId, qty } = req.body;
+  if (!userId) return res.json({ success: false });
+  res.json({ success: await updateOrderQty(userId, Number(req.params.ri), qty) });
+});
+
 app.patch('/api/order/:ri/note', async (req, res) => {
   const { userId, note } = req.body;
   if (!userId) return res.json({ success:false });
@@ -563,6 +593,9 @@ function buildOrderPage(liffId) {
   p('.tag-paid{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#dcfce7;color:#15803d}');
   p('.tag-unpaid{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#fef3c7;color:#b45309}');
   p('.icon-btn{background:none;border:none;font-size:17px;cursor:pointer;padding:3px}');
+  p('.qty-inline{display:inline-flex;align-items:center;gap:0;border:1.5px solid var(--bdr);border-radius:999px;overflow:hidden;background:#fff}');
+  p('.qty-inline button{background:none;border:none;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--g);font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1}');
+  p('.qty-inline span{min-width:24px;text-align:center;font-size:13px;font-weight:700}');
   p('.dcwrap{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none}');
   p('.dcwrap::-webkit-scrollbar{display:none}');
   p('.dchip{padding:4px 12px;border-radius:999px;border:1.5px solid var(--bdr);font-size:12px;cursor:pointer;white-space:nowrap;background:#fff;flex-shrink:0}');
@@ -1004,7 +1037,13 @@ function buildOrderPage(liffId) {
   p('      +\'</div>\'');
   p('      +\'<div class="oact">\'');
   p('      +\'<div class="oprice">$\'+o.total+\'</div>\'');
-  p('      +(canEdit?\'<button class="icon-btn" onclick="openEditNote(\'+o.rowIndex+\',\'+JSON.stringify(o.note||"")+\')">✏️</button>\':"")');
+  p('      +(canEdit?');
+  p('        \'<div class="qty-inline">\'+');
+  p('        \'<button onclick="chOrderQty(\'+o.rowIndex+\',\'+o.qty+\',-1)">−</button>\'+');
+  p('        \'<span>\'+o.qty+\'</span>\'+');
+  p('        \'<button onclick="chOrderQty(\'+o.rowIndex+\',\'+o.qty+\',1)">＋</button>\'+');
+  p('        \'</div>\'');
+  p('      :"")+(canEdit?\'<button class="icon-btn" onclick="openEditNote(\'+o.rowIndex+\',\'+JSON.stringify(o.note||"")+\')">✏️</button>\':"")');
   p('      +(canEdit?\'<button class="icon-btn" onclick="delOrder(\'+o.rowIndex+\')">🗑</button>\':"")');
   p('      +\'</div></div>\';');
   p('  }).join("");');
@@ -1040,7 +1079,22 @@ function buildOrderPage(liffId) {
   p('}');
 
   /* editNote */
-  p('function openEditNote(rowIndex,cur){editRI=rowIndex;document.getElementById("noteInput").value=cur||"";openModal("moNote");}');
+  p('async function chOrderQty(rowIndex,curQty,delta){');
+  p('  var newQty=Math.min(20,Math.max(1,(curQty||1)+delta));');
+  p('  if(newQty===curQty)return;');
+  p('  try{');
+  p('    var r=await fetch("/api/order/"+rowIndex+"/qty",{');
+  p('      method:"PATCH",');
+  p('      headers:{"Content-Type":"application/json"},');
+  p('      body:JSON.stringify({userId:profile.userId,qty:newQty})');
+  p('    });');
+  p('    var d=await r.json();');
+  p('    if(d.success){showToast("數量已更新");loadMyOrders(curDate);}');
+  p('    else showToast("更新失敗，請重試");');
+  p('  }catch(e){showToast("更新失敗："+e.message);}');
+  p('}');
+
+p('function openEditNote(rowIndex,cur){editRI=rowIndex;document.getElementById("noteInput").value=cur||"";openModal("moNote");}');
   p('async function saveNote(){');
   p('  var note=document.getElementById("noteInput").value.trim();');
   p('  var r=await fetch("/api/order/"+editRI+"/note",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:profile.userId,note:note})});');
