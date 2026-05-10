@@ -91,7 +91,11 @@ async function loadOptions() {
     if (!result[key]) result[key] = [];
     const opts = or
       .filter(o => String(o['店家']||'').trim()===store && String(o['品項']||'').trim()===item && String(o['分類']||'').trim()===cat)
-      .map(o => String(o['選項']||'').trim()).filter(Boolean);
+      .map(o => ({
+        name:  String(o['選項'] || '').trim(),
+        extra: parseFloat(String(o['加價'] || '0').replace(/[^0-9.]/g,'')) || 0
+      }))
+      .filter(o => o.name);
     result[key].push({ category:cat, required:String(g['必選']||'').trim()==='TRUE', min:Number(g['最少']||0), max:Number(g['最多']||0), options:opts });
   });
   return result;
@@ -853,7 +857,11 @@ function buildOrderPage(liffId) {
   p('      g.options.forEach(function(opt){');
   p('        var c=document.createElement("div");');
   p('        c.className="chip";');
-  p('        c.textContent=opt;');
+  p('        var optName=typeof opt==="object"?opt.name:opt;');
+  p('        var optExtra=typeof opt==="object"?(opt.extra||0):0;');
+  p('        c.textContent=optName+(optExtra>0?" +$"+optExtra:"");');
+  p('        c.dataset.optname=optName;');
+  p('        c.dataset.extra=optExtra;');
   p('        c.addEventListener("click",function(){toggleChip(gi,g.max,c);});');
   p('        chips.appendChild(c);');
   p('      });');
@@ -886,7 +894,16 @@ function buildOrderPage(liffId) {
   p('    if(sel.length<g.min||sel.length>g.max){alert(g.category+" 需要選 "+g.min+"~"+g.max+" 個");return;}');
   p('    if(sel.length)specParts.push(g.category+"："+sel.map(function(c){return c.textContent;}).join("、"));');
   p('  }');
-  p('  cart.push({store:curItem.store,item:curItem.item,spec:specParts.join(" "),note:document.getElementById("itemNote").value.trim(),qty:curQty,price:curItem.price});');
+  p('  // 計算所有選項的加價總和');
+  p('  var extraTotal=0;');
+  p('  document.querySelectorAll(".chip.on").forEach(function(ch){');
+  p('    extraTotal+=parseFloat(ch.dataset.extra||0);');
+  p('  });');
+  p('  var finalPrice=curItem.price+extraTotal;');
+  p('  // specParts 加上加價標示');
+  p('  var specStr=specParts.join(" ");');
+  p('  if(extraTotal>0)specStr=specStr+(specStr?" ":"")+"(+$"+extraTotal+")";');
+  p('  cart.push({store:curItem.store,item:curItem.item,spec:specStr,note:document.getElementById("itemNote").value.trim(),qty:curQty,price:finalPrice,basePrice:curItem.price,extra:extraTotal});');
   p('  closeModal("moOpts");');
   p('  updBadge();');
   p('  showToast("已加入購物車 🎉");');
@@ -1190,6 +1207,14 @@ function buildAdminPage() {
 
   /* responsive */
   p('@media(max-width:640px){th,td{padding:8px 7px;font-size:12px}.stat-grid{grid-template-columns:repeat(2,1fr)}.stat-grid.six{grid-template-columns:repeat(2,1fr)}}');
+  p('.chart-title{font-size:12px;font-weight:700;color:var(--sub);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}');
+  p('.chart-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}');
+  p('.chart-lbl{font-size:12px;font-weight:600;color:var(--txt);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}');
+  p('.chart-bar-wrap{flex:1;background:#f1f5f9;border-radius:999px;height:20px;overflow:hidden;position:relative}');
+  p('.chart-bar{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--g),#00c851);transition:width .4s ease;min-width:2px}');
+  p('.chart-bar.r{background:linear-gradient(90deg,var(--r),#ff6b6b)}');
+  p('.chart-val{font-size:12px;font-weight:700;color:var(--sub);width:54px;text-align:right;flex-shrink:0}');
+  p('.chart-section{margin-bottom:18px}');
   p('</style></head><body>');
 
   /* ── HEADER ──────────────────────────────────────────────── */
@@ -1226,7 +1251,9 @@ function buildAdminPage() {
   p('<div class="section-title">今日統計</div>');
   p('<div class="stat-grid six" id="statsEl">');
   p('  <div class="sbox"><div class="snum">—</div><div class="slbl">載入中</div></div>');
-  p('</div></div>');
+  p('</div>');
+  p('<div id="chartEl" style="margin-top:14px"></div>');
+  p('</div>');
 
   /* ── 訂單列表 ──────────────────────────────────────────────── */
   p('<div class="section">');
@@ -1321,7 +1348,46 @@ function buildAdminPage() {
   p('  var uM=unpaid.reduce(function(a,x){return a+x.total;},0);');
   p('  document.getElementById("statsEl").innerHTML=');
   p('    sb(act.length,"筆訂單","")+sb("$"+tot,"總金額","b")+sb("$"+pM,"已收款","g")+sb("$"+uM,"待收款","r")+sb(paid.length,"已付款","g")+sb(unpaid.length,"未付款","o");');
+  p('  renderChart(act);');
   p('}');
+
+  p('function renderChart(act){');
+  p('  var el=document.getElementById("chartEl");');
+  p('  if(!el||!act.length){if(el)el.innerHTML="";return;}');
+  p('  // 各店家統計');
+  p('  var stores={};');
+  p('  act.forEach(function(o){');
+  p('    if(!stores[o.store])stores[o.store]={total:0,qty:0};');
+  p('    stores[o.store].total+=o.total;');
+  p('    stores[o.store].qty+=o.qty;');
+  p('  });');
+  p('  var names=Object.keys(stores);');
+  p('  if(!names.length){el.innerHTML="";return;}');
+  p('  var maxTotal=Math.max.apply(null,names.map(function(k){return stores[k].total;}));');
+  p('  var maxQty=Math.max.apply(null,names.map(function(k){return stores[k].qty;}));');
+  p('  function mkBar(val,max,cls,unit){');
+  p('    var pct=max>0?Math.round(val/max*100):0;');
+  p('    return \'<div class="chart-bar \'+cls+\'" style="width:\'+pct+\'%"></div>\';');
+  p('  }');
+  p('  var h=\'<div class="chart-title">各店家金額</div>\';');
+  p('  names.forEach(function(k){');
+  p('    h+=\'<div class="chart-row">\'+');
+  p('      \'<div class="chart-lbl" title="\'+esc(k)+\'">\'+ esc(k)+\'</div>\'+');
+  p('      \'<div class="chart-bar-wrap">\'+ mkBar(stores[k].total,maxTotal,"","$")+\'</div>\'+');
+  p('      \'<div class="chart-val">$\'+stores[k].total+\'</div>\'+');
+  p('    \'</div>\';');
+  p('  });');
+  p('  h+=\'<div class="chart-title" style="margin-top:14px">各店家份數</div>\';');
+  p('  names.forEach(function(k){');
+  p('    h+=\'<div class="chart-row">\'+');
+  p('      \'<div class="chart-lbl" title="\'+esc(k)+\'">\'+ esc(k)+\'</div>\'+');
+  p('      \'<div class="chart-bar-wrap">\'+ mkBar(stores[k].qty,maxQty,"r","份")+\'</div>\'+');
+  p('      \'<div class="chart-val">\'+stores[k].qty+\'份</div>\'+');
+  p('    \'</div>\';');
+  p('  });');
+  p('  el.innerHTML=\'<div class="chart-section">\'+h+\'</div>\';');
+  p('}');
+
   p('function sb(n,l,cls){return \'<div class="sbox hi\'+(cls?" "+cls:"")+\'"><div class="snum">\'+n+\'</div><div class="slbl">\'+l+\'</div></div>\';}');
 
   /* render table */
@@ -1416,7 +1482,8 @@ function buildAdminPage() {
   p('  if(!act.length){alert("今日無訂單");return;}');
   p('  var cnt={};');
   p('  act.forEach(function(o){var k=o.item+(o.spec?"（"+o.spec+"）":"");cnt[k]=(cnt[k]||0)+o.qty;});');
-  p('  var lines=["您好，今天訂購如下：",""];');
+  p('  var dl=document.getElementById("dateF").value||"今日";');
+  p('  var lines=["您好，"+dl+" 訂購如下：",""];');
   p('  var n=0;');
   p('  Object.keys(cnt).forEach(function(k){lines.push(k+" x"+cnt[k]);n+=cnt[k];});');
   p('  var m=act.reduce(function(a,o){return a+o.total;},0);');
