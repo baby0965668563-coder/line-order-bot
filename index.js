@@ -145,7 +145,7 @@ msg += ‘例：\n2　　　（點2號）\n2不要菜　（加備註）\n2+3　�
 return msg;
 }
 
-// 解析文字訂餐：「2不要菜」「3+2加辣」「1」
+// 解析文字訂餐：“2不要菜”“3+2加辣”“1”
 function parseTextOrder(text, menuList) {
 // 支援格式：數字 [+數量] [備註文字]
 // e.g. “2”, “2不要菜”, “3+2”, “3+2加辣”, “1+3 飯少一點”
@@ -212,7 +212,7 @@ return { success: false, reason: e.message };
 }
 }
 
-// 查詢某人今日訂單（給「我的訂單」指令用）
+// 查詢某人今日訂單（給”我的訂單”指令用）
 async function getMyTextOrders(userId) {
 try {
 await authSheet();
@@ -235,7 +235,7 @@ status: String(r[‘狀態’] || ‘’)
 } catch(e) { return []; }
 }
 
-// 標記付款（管理員輸入「XXX 已付款」）
+// 標記付款（管理員輸入”XXX 已付款”）
 async function markPaidByName(name) {
 try {
 await authSheet();
@@ -1951,7 +1951,7 @@ if (isOpen && textMenuCache.length) {
       if (parsed.qty > 1) msg += ' ×' + parsed.qty;
       if (parsed.note) msg += '（' + parsed.note + '）';
       msg += '\n金額：$' + (parsed.price * parsed.qty);
-      msg += '\n\n輸入「我的訂單」查看，輸入「取消」可取消';
+      msg += '\n\n輸入"我的訂單"查看，輸入"取消"可取消';
       await reply(msg);
     } else {
       await reply('訂單失敗，請重試或聯絡管理員');
@@ -1962,7 +1962,7 @@ if (isOpen && textMenuCache.length) {
 
 // ── 開團中但看不懂的訊息：給提示 ───────────────────────────
 if (isOpen && textMenuCache.length) {
-  await reply('請輸入數字點餐，例如「2」或「2不要菜」\n輸入「菜單」可重看菜單');
+  await reply('請輸入數字點餐，例如"2"或"2不要菜"\n輸入"菜單"可重看菜單');
   return res.sendStatus(200);
 }
 
