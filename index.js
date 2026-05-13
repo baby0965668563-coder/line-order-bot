@@ -110,15 +110,62 @@ function buildMenuMessage(menuList) {
   return msg;
 }
 
+function normalizeOrderText(text) {
+
+  return String(text || '')
+    .replace(/1️⃣/g, '1')
+    .replace(/2️⃣/g, '2')
+    .replace(/3️⃣/g, '3')
+    .replace(/4️⃣/g, '4')
+    .replace(/5️⃣/g, '5')
+    .replace(/6️⃣/g, '6')
+    .replace(/7️⃣/g, '7')
+    .replace(/8️⃣/g, '8')
+    .replace(/9️⃣/g, '9')
+    .replace(/🔟/g, '10')
+
+    .replace(/０/g, '0')
+    .replace(/１/g, '1')
+    .replace(/２/g, '2')
+    .replace(/３/g, '3')
+    .replace(/４/g, '4')
+    .replace(/５/g, '5')
+    .replace(/６/g, '6')
+    .replace(/７/g, '7')
+    .replace(/８/g, '8')
+    .replace(/９/g, '9')
+
+    .replace(/＋/g, '+')
+
+    .trim();
+}
+
 function parseTextOrder(text, menuList) {
-  const m = text.match(/^([0-9]+)(?:[+＋]([0-9]+))?(.*)$/);
+
+  const normalized = normalizeOrderText(text);
+
+  const m = normalized.match(
+    /^([0-9]{1,2})(?:\+([0-9]{1,2}))?(.*)$/
+  );
+
   if (!m) return null;
 
   const no = parseInt(m[1], 10);
-  const qty = Math.min(20, Math.max(1, parseInt(m[2] || '1', 10)));
+
+  if (isNaN(no)) return null;
+
+  const qty = Math.min(
+    20,
+    Math.max(
+      1,
+      parseInt(m[2] || '1', 10)
+    )
+  );
+
   const note = String(m[3] || '').trim();
 
   const item = menuList.find(x => x.no === no);
+
   if (!item) return null;
 
   return {
@@ -581,7 +628,86 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
+        function parseLegacyOrders(text) {
+
+  const lines = text
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  let currentItem = null;
+
+  const results = [];
+
+  for (const line of lines) {
+
+    const itemMatch = line.match(
+      /^(.+?)\s*\$(\d+)/
+    );
+
+    if (itemMatch) {
+
+      currentItem = {
+        item: itemMatch[1].trim(),
+        price: Number(itemMatch[2])
+      };
+
+      continue;
+    }
+
+    const orderMatch = line.match(
+      /^(.+?)\s*\+(\d+)\s*(.*)$/
+    );
+
+    if (orderMatch && currentItem) {
+
+      results.push({
+        name: orderMatch[1].trim(),
+        qty: Number(orderMatch[2]),
+        note: (orderMatch[3] || '').trim(),
+        item: currentItem.item,
+        price: currentItem.price
+      });
+
+    }
+  }
+
+  return results;
+}
+        
         if (isOpen) {
+if (text.includes('$')) {
+
+  const parsedList = parseLegacyOrders(text);
+
+  if (parsedList.length) {
+
+    let ok = 0;
+
+    for (const p of parsedList) {
+
+      const result = await saveTextOrder(
+        p.name,
+        'legacy_' + p.name,
+        {
+          item: p.item,
+          store: '手動輸入',
+          price: p.price,
+          qty: p.qty,
+          note: p.note
+        }
+      );
+
+      if (result.success) ok++;
+    }
+
+    await reply(
+      '✅ 已匯入 ' + ok + ' 筆舊版訂單'
+    );
+
+    continue;
+  }
+}
           await reply('目前已開單中');
           continue;
         }
