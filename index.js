@@ -1,47 +1,22 @@
 require('dotenv').config();
 
 const express = require('express');
-const line = require('@line/bot-sdk');
+const line    = require('@line/bot-sdk');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
 
 const lineConfig = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET
+  channelSecret:      process.env.CHANNEL_SECRET
 };
 
+// ★ LINE webhook 必須在 express.json() 之前
 app.use('/webhook', line.middleware(lineConfig));
-app.use('/api', express.json());
+app.use('/api',    express.json());
+app.use('/admin',  express.json());
 
 const client = new line.Client(lineConfig);
-
-app.post('/webhook', (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then(() => res.status(200).end())
-    .catch(err => {
-      console.error(err);
-      res.status(500).end();
-    });
-});
-
-async function handleEvent(event) {
-
-  if (event.type === 'message' && event.message.type === 'text') {
-
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '收到訊息了！'
-    });
-
-  }
-
-  return null;
-}
-
-app.listen(process.env.PORT || 3000, () => {
-  console.log('Server running');
-});
 const doc    = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 // ════════════════════════════════════════════════════════════════
@@ -116,11 +91,7 @@ async function loadOptions() {
     if (!result[key]) result[key] = [];
     const opts = or
       .filter(o => String(o['店家']||'').trim()===store && String(o['品項']||'').trim()===item && String(o['分類']||'').trim()===cat)
-      .map(o => ({
-        name:  String(o['選項'] || '').trim(),
-        extra: parseFloat(String(o['加價'] || '0').replace(/[^0-9.]/g,'')) || 0
-      }))
-      .filter(o => o.name);
+      .map(o => String(o['選項']||'').trim()).filter(Boolean);
     result[key].push({ category:cat, required:String(g['必選']||'').trim()==='TRUE', min:Number(g['最少']||0), max:Number(g['最多']||0), options:opts });
   });
   return result;
@@ -141,205 +112,6 @@ async function saveUserToSheet(name, userId, src, gid) {
 // ════════════════════════════════════════════════════════════════
 //  Orders CRUD
 // ════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════
-//  純文字訂餐模式（阿姨版）
-//  不需要 LIFF，LINE 裡直接回覆數字即可
-// ════════════════════════════════════════════════════════════════
-
-// 今日菜單快取（開團時載入，結單時清除）
-let textMenuCache = [];   // [{no, store, item, price}]
-
-// 讀菜單並編號
-async function loadTextMenu() {
-  const menu = await loadMenu();
-  textMenuCache = menu.map((m, i) => ({ no: i + 1, store: m.store, item: m.item, price: m.price }));
-  return textMenuCache;
-}
-
-// 產生菜單訊息
-function buildMenuMessage(menuList) {
-  const emojiNum = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
-  let msg = '🍱 今日菜單\n';
-  msg += '─────────────\n';
-  menuList.forEach(m => {
-    const em = m.no <= 10 ? emojiNum[m.no - 1] : m.no + '.';
-    msg += em + ' ' + m.item + '　$' + m.price + '\n';
-  });
-  msg += '\n請直接回覆數字點餐：\n';
-  msg += '例：\n2　　　（點2號）\n2不要菜　（加備註）\n2+3　　（點2號，3份）';
-  return msg;
-}
-
-// 解析文字訂餐："2不要菜""3+2加辣""1"
-function parseTextOrder(text, menuList) {
-  // 支援格式：數字 [+數量] [備註文字]
-  // e.g. "2", "2不要菜", "3+2", "3+2加辣", "1+3 飯少一點"
-  const m = text.match(/^([0-9]+)(?:[+＋]([0-9]+))?(.*)$/);
-  if (!m) return null;
-  const no   = parseInt(m[1], 10);
-  const qty  = Math.min(20, Math.max(1, parseInt(m[2] || '1', 10)));
-  const note = (m[3] || '').trim();
-  const item = menuList.find(x => x.no === no);
-  if (!item) return null;
-  return { no, item: item.item, store: item.store, price: item.price, qty, note };
-}
-
-// 儲存或覆蓋文字訂單（同一人今日同品項覆蓋，不同品項新增）
-async function saveTextOrder(name, userId, parsed) {
-  try {
-    await authSheet();
-    const sheet = doc.sheetsByTitle['Orders'];
-    if (!sheet) return { success: false, reason: 'no_sheet' };
-    const rows  = await sheet.getRows();
-    const today = todayTW();
-
-    // 找今日同一人同品項的未刪除訂單
-    const existing = rows.find(r =>
-      String(r['userId'] || '') === String(userId) &&
-      String(r['品項']   || '').trim() === String(parsed.item).trim() &&
-      String(r['時間']   || '').startsWith(today) &&
-      String(r['狀態']   || '') !== '已刪除'
-    );
-
-    if (existing) {
-      // 覆蓋：更新數量、備註、總價
-      existing['數量'] = parsed.qty;
-      existing['備註'] = parsed.note;
-      existing['總價'] = parsed.price * parsed.qty;
-      await existing.save();
-      return { success: true, action: 'updated' };
-    }
-
-    // 新增
-    await sheet.addRow({
-      時間:     nowTW(),
-      LINE名稱: name,
-      userId:   String(userId),
-      店家:     parsed.store,
-      品項:     parsed.item,
-      規格:     '',
-      備註:     parsed.note,
-      數量:     parsed.qty,
-      單價:     parsed.price,
-      總價:     parsed.price * parsed.qty,
-      狀態:     '未付款',
-      付款時間: '',
-      付款方式: '',
-      訂單備註: ''
-    });
-    return { success: true, action: 'created' };
-  } catch(e) {
-    console.error('saveTextOrder fail:', e.message);
-    return { success: false, reason: e.message };
-  }
-}
-
-// 查詢某人今日訂單（給"我的訂單"指令用）
-async function getMyTextOrders(userId) {
-  try {
-    await authSheet();
-    const sheet = doc.sheetsByTitle['Orders'];
-    if (!sheet) return [];
-    const rows  = await sheet.getRows();
-    const today = todayTW();
-    return rows.filter(r =>
-      String(r['userId'] || '') === String(userId) &&
-      String(r['時間']   || '').startsWith(today) &&
-      String(r['狀態']   || '') !== '已刪除'
-    ).map(r => ({
-      item:   String(r['品項'] || ''),
-      note:   String(r['備註'] || ''),
-      qty:    Number(r['數量'] || 1),
-      price:  Number(r['單價'] || 0),
-      total:  Number(r['總價'] || 0),
-      status: String(r['狀態'] || '')
-    }));
-  } catch(e) { return []; }
-}
-
-// 標記付款（管理員輸入"XXX 已付款"）
-async function markPaidByName(name) {
-  try {
-    await authSheet();
-    const sheet = doc.sheetsByTitle['Orders'];
-    if (!sheet) return 0;
-    const rows  = await sheet.getRows();
-    const today = todayTW();
-    let count = 0;
-    for (const r of rows) {
-      if (
-        String(r['LINE名稱'] || '').trim() === name.trim() &&
-        String(r['時間']     || '').startsWith(today) &&
-        String(r['狀態']     || '') === '未付款'
-      ) {
-        r['狀態']    = '已付款';
-        r['付款時間'] = nowTW();
-        r['付款方式'] = '現金';
-        await r.save();
-        count++;
-      }
-    }
-    return count;
-  } catch(e) { return 0; }
-}
-
-// 產生文字統計報表（更詳細版，給查看訂單指令）
-async function buildDetailedReport() {
-  const orders = await getAllOrdersByDate(todayTW());
-  const active = orders.filter(o => o.status !== '已刪除');
-  if (!active.length) return '📋 今日尚無訂單';
-
-  // 依人員分組
-  const byPerson = {};
-  for (const o of active) {
-    const n = o.name || '未知';
-    if (!byPerson[n]) byPerson[n] = { orders: [], total: 0, paid: false };
-    byPerson[n].orders.push(o);
-    byPerson[n].total += o.total;
-    if (o.status === '已付款') byPerson[n].paid = true;
-  }
-
-  let msg = '📋 今日訂單明細\n';
-  msg += '─────────────\n';
-  for (const name in byPerson) {
-    const p = byPerson[name];
-    const payIcon = p.orders.every(o => o.status === '已付款') ? '✅' : '💰';
-    msg += payIcon + ' ' + name + '（$' + p.total + '）\n';
-    for (const o of p.orders) {
-      msg += '  • ' + o.item;
-      if (o.qty > 1) msg += ' ×' + o.qty;
-      if (o.note) msg += '（' + o.note + '）';
-      msg += '\n';
-    }
-  }
-
-  const grand = active.reduce((a, o) => a + o.total, 0);
-  const unpaidNames = Object.keys(byPerson).filter(n =>
-    byPerson[n].orders.some(o => o.status === '未付款')
-  );
-  msg += '─────────────\n';
-  msg += '💰 總金額：$' + grand + '\n';
-  if (unpaidNames.length) {
-    msg += '⚠️ 未付款：' + unpaidNames.join('、');
-  } else {
-    msg += '✅ 全部已付款';
-  }
-  return msg;
-}
-
-// 產生匯出格式（CSV 式文字，方便複製）
-async function buildExportText() {
-  const orders = await getAllOrdersByDate(todayTW());
-  const active = orders.filter(o => o.status !== '已刪除');
-  if (!active.length) return '今日尚無訂單';
-  let out = '姓名,品項,數量,備註,金額,付款狀態\n';
-  for (const o of active) {
-    out += [o.name, o.item, o.qty, o.note, o.total, o.status].join(',') + '\n';
-  }
-  return out;
-}
-
-
 async function saveOrderToSheet(order) {
   try {
     await authSheet();
@@ -411,30 +183,6 @@ async function deleteOrder(userId, rowIndex) {
     if (!t) return false;
     t['狀態']='已刪除'; await t.save(); return true;
   } catch(e) { return false; }
-}
-
-async function updateOrderQty(userId, rowIndex, qty) {
-  try {
-    await authSheet();
-    const s = doc.sheetsByTitle['Orders'];
-    if (!s) return false;
-    const rows = await s.getRows();
-    const t = rows.find(r =>
-      Number(r.rowIndex) === Number(rowIndex) &&
-      String(r['userId'] || '') === String(userId) &&
-      String(r['狀態'] || '') === '未付款'
-    );
-    if (!t) return false;
-    const q     = Math.min(20, Math.max(1, Number(qty) || 1));
-    const price = Number(t['單價'] || 0);
-    t['數量'] = q;
-    t['總價'] = price * q;
-    await t.save();
-    return true;
-  } catch(e) {
-    console.error('updateOrderQty fail:', e.message);
-    return false;
-  }
 }
 
 async function updateOrderNote(userId, rowIndex, note) {
@@ -538,35 +286,14 @@ function scheduleAutoClose(minutes) {
   if (autoCloseTimer) clearTimeout(autoCloseTimer);
   const ms = Math.max(1, Number(minutes)) * 60 * 1000;
   autoCloseAt    = new Date(Date.now() + ms).toISOString();
-
-  // 提前 5 分鐘推播提醒（只在時間 > 5 分鐘時）
-  if (ms > 5 * 60 * 1000) {
-    setTimeout(() => {
-      if (isOpen) pushToGroup('⏰ 距離收單還有 5 分鐘，請把握時間點餐！');
-    }, ms - 5 * 60 * 1000);
-  }
-
-  autoCloseTimer = setTimeout(async () => {
+  autoCloseTimer = setTimeout(() => {
     isOpen = false; autoCloseAt = null; autoCloseTimer = null;
     console.log('[自動結單]', nowTW());
-    const stat = await buildStatReport().catch(() => '');
-    pushToGroup('🔴 已自動結單！\n\n' + stat);
   }, ms);
 }
 function cancelAutoClose() {
   if (autoCloseTimer) clearTimeout(autoCloseTimer);
   autoCloseTimer = null; autoCloseAt = null;
-}
-
-// ── 推播通知（需設定 LINE_GROUP_ID 環境變數）─────────────────────
-async function pushToGroup(text) {
-  const gid = process.env.LINE_GROUP_ID || '';
-  if (!gid) return;
-  try {
-    await client.pushMessage(gid, { type: 'text', text });
-  } catch(e) {
-    console.error('[push] fail:', e.message);
-  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -671,12 +398,6 @@ app.delete('/api/order/:ri', async (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.json({ success:false });
   res.json({ success: await deleteOrder(userId, Number(req.params.ri)) });
-});
-
-app.patch('/api/order/:ri/qty', async (req, res) => {
-  const { userId, qty } = req.body;
-  if (!userId) return res.json({ success: false });
-  res.json({ success: await updateOrderQty(userId, Number(req.params.ri), qty) });
 });
 
 app.patch('/api/order/:ri/note', async (req, res) => {
@@ -817,9 +538,6 @@ function buildOrderPage(liffId) {
   p('.tag-paid{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#dcfce7;color:#15803d}');
   p('.tag-unpaid{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;background:#fef3c7;color:#b45309}');
   p('.icon-btn{background:none;border:none;font-size:17px;cursor:pointer;padding:3px}');
-  p('.qty-inline{display:inline-flex;align-items:center;gap:0;border:1.5px solid var(--bdr);border-radius:999px;overflow:hidden;background:#fff}');
-  p('.qty-inline button{background:none;border:none;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--g);font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1}');
-  p('.qty-inline span{min-width:24px;text-align:center;font-size:13px;font-weight:700}');
   p('.dcwrap{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;scrollbar-width:none}');
   p('.dcwrap::-webkit-scrollbar{display:none}');
   p('.dchip{padding:4px 12px;border-radius:999px;border:1.5px solid var(--bdr);font-size:12px;cursor:pointer;white-space:nowrap;background:#fff;flex-shrink:0}');
@@ -970,17 +688,7 @@ function buildOrderPage(liffId) {
   p('    else{el.textContent="未開放";el.className="hd-badge closed";}');
   p('    if(d.autoCloseAt)startCd(d.autoCloseAt);');
   p('    else document.getElementById("hdCd").textContent="";');
-  p('    updateOrderBtns(d.isOpen);');
   p('  }catch(e){}');
-  p('}');
-
-  p('function updateOrderBtns(open){');
-  p('  menu.forEach(function(_,i){');
-  p('    var b=document.getElementById("btn"+i);');
-  p('    if(!b)return;');
-  p('    if(open){b.disabled=false;b.textContent="加入購物車";}');
-  p('    else{b.disabled=true;b.textContent="未開放點餐";}');
-  p('  });');
   p('}');
 
   /* startCd */
@@ -1114,11 +822,7 @@ function buildOrderPage(liffId) {
   p('      g.options.forEach(function(opt){');
   p('        var c=document.createElement("div");');
   p('        c.className="chip";');
-  p('        var optName=typeof opt==="object"?opt.name:opt;');
-  p('        var optExtra=typeof opt==="object"?(opt.extra||0):0;');
-  p('        c.textContent=optName+(optExtra>0?" +$"+optExtra:"");');
-  p('        c.dataset.optname=optName;');
-  p('        c.dataset.extra=optExtra;');
+  p('        c.textContent=opt;');
   p('        c.addEventListener("click",function(){toggleChip(gi,g.max,c);});');
   p('        chips.appendChild(c);');
   p('      });');
@@ -1151,16 +855,7 @@ function buildOrderPage(liffId) {
   p('    if(sel.length<g.min||sel.length>g.max){alert(g.category+" 需要選 "+g.min+"~"+g.max+" 個");return;}');
   p('    if(sel.length)specParts.push(g.category+"："+sel.map(function(c){return c.textContent;}).join("、"));');
   p('  }');
-  p('  // 計算所有選項的加價總和');
-  p('  var extraTotal=0;');
-  p('  document.querySelectorAll(".chip.on").forEach(function(ch){');
-  p('    extraTotal+=parseFloat(ch.dataset.extra||0);');
-  p('  });');
-  p('  var finalPrice=curItem.price+extraTotal;');
-  p('  // specParts 加上加價標示');
-  p('  var specStr=specParts.join(" ");');
-  p('  if(extraTotal>0)specStr=specStr+(specStr?" ":"")+"(+$"+extraTotal+")";');
-  p('  cart.push({store:curItem.store,item:curItem.item,spec:specStr,note:document.getElementById("itemNote").value.trim(),qty:curQty,price:finalPrice,basePrice:curItem.price,extra:extraTotal});');
+  p('  cart.push({store:curItem.store,item:curItem.item,spec:specParts.join(" "),note:document.getElementById("itemNote").value.trim(),qty:curQty,price:curItem.price});');
   p('  closeModal("moOpts");');
   p('  updBadge();');
   p('  showToast("已加入購物車 🎉");');
@@ -1189,12 +884,6 @@ function buildOrderPage(liffId) {
 
   p('async function submitCart(){');
   p('  if(!cart.length){alert("購物車是空的");return;}');
-  p('  // 送單前確認是否仍開放點餐');
-  p('  try{');
-  p('    var sr=await fetch("/api/status");');
-  p('    var sd=await sr.json();');
-  p('    if(!sd.isOpen){alert("目前未開放點餐，無法送出訂單。");return;}');
-  p('  }catch(e){}');
   p('  var btn=document.getElementById("submitBtn");');
   p('  btn.disabled=true;btn.textContent="送出中...";');
   p('  for(var i=0;i<cart.length;i++){');
@@ -1261,13 +950,7 @@ function buildOrderPage(liffId) {
   p('      +\'</div>\'');
   p('      +\'<div class="oact">\'');
   p('      +\'<div class="oprice">$\'+o.total+\'</div>\'');
-  p('      +(canEdit?');
-  p('        \'<div class="qty-inline">\'+');
-  p('        \'<button onclick="chOrderQty(\'+o.rowIndex+\',\'+o.qty+\',-1)">−</button>\'+');
-  p('        \'<span>\'+o.qty+\'</span>\'+');
-  p('        \'<button onclick="chOrderQty(\'+o.rowIndex+\',\'+o.qty+\',1)">＋</button>\'+');
-  p('        \'</div>\'');
-  p('      :"")+(canEdit?\'<button class="icon-btn" onclick="openEditNote(\'+o.rowIndex+\',\'+JSON.stringify(o.note||"")+\')">✏️</button>\':"")');
+  p('      +(canEdit?\'<button class="icon-btn" onclick="openEditNote(\'+o.rowIndex+\',\'+JSON.stringify(o.note||"")+\')">✏️</button>\':"")');
   p('      +(canEdit?\'<button class="icon-btn" onclick="delOrder(\'+o.rowIndex+\')">🗑</button>\':"")');
   p('      +\'</div></div>\';');
   p('  }).join("");');
@@ -1279,17 +962,8 @@ function buildOrderPage(liffId) {
   p('  var o=ordersCache[oi];');
   p('  if(!o)return;');
   p('  var idx=menu.findIndex(function(m){return m.store===o.store&&m.item===o.item;});');
-  p('  // 優先用歷史單價（含加價），其次 total/qty，最後才用菜單基礎價');
-  p('  var usePrice=0;');
-  p('  if(o.price&&o.price>0){');
-  p('    usePrice=o.price;');
-  p('  }else if(o.total&&o.qty&&o.qty>0){');
-  p('    usePrice=Math.round(o.total/o.qty);');
-  p('  }else if(idx>=0){');
-  p('    usePrice=menu[idx].price;');
-  p('  }');
-  p('  if(usePrice<=0&&idx<0){showToast("此品項已不在菜單中");return;}');
-  p('  cart.push({store:o.store,item:o.item,spec:o.spec||"",note:o.note||"",qty:o.qty||1,price:usePrice});');
+  p('  if(idx<0){showToast("此品項已不在菜單中");return;}');
+  p('  cart.push({store:o.store,item:o.item,spec:o.spec||"",note:o.note||"",qty:o.qty||1,price:menu[idx].price});');
   p('  updBadge();');
   p('  showToast("已加入購物車 🔄");');
   p('}');
@@ -1303,22 +977,7 @@ function buildOrderPage(liffId) {
   p('}');
 
   /* editNote */
-  p('async function chOrderQty(rowIndex,curQty,delta){');
-  p('  var newQty=Math.min(20,Math.max(1,(curQty||1)+delta));');
-  p('  if(newQty===curQty)return;');
-  p('  try{');
-  p('    var r=await fetch("/api/order/"+rowIndex+"/qty",{');
-  p('      method:"PATCH",');
-  p('      headers:{"Content-Type":"application/json"},');
-  p('      body:JSON.stringify({userId:profile.userId,qty:newQty})');
-  p('    });');
-  p('    var d=await r.json();');
-  p('    if(d.success){showToast("數量已更新");loadMyOrders(curDate);}');
-  p('    else showToast("更新失敗，請重試");');
-  p('  }catch(e){showToast("更新失敗："+e.message);}');
-  p('}');
-
-p('function openEditNote(rowIndex,cur){editRI=rowIndex;document.getElementById("noteInput").value=cur||"";openModal("moNote");}');
+  p('function openEditNote(rowIndex,cur){editRI=rowIndex;document.getElementById("noteInput").value=cur||"";openModal("moNote");}');
   p('async function saveNote(){');
   p('  var note=document.getElementById("noteInput").value.trim();');
   p('  var r=await fetch("/api/order/"+editRI+"/note",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:profile.userId,note:note})});');
@@ -1494,14 +1153,6 @@ function buildAdminPage() {
 
   /* responsive */
   p('@media(max-width:640px){th,td{padding:8px 7px;font-size:12px}.stat-grid{grid-template-columns:repeat(2,1fr)}.stat-grid.six{grid-template-columns:repeat(2,1fr)}}');
-  p('.chart-title{font-size:12px;font-weight:700;color:var(--sub);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px}');
-  p('.chart-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}');
-  p('.chart-lbl{font-size:12px;font-weight:600;color:var(--txt);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}');
-  p('.chart-bar-wrap{flex:1;background:#f1f5f9;border-radius:999px;height:20px;overflow:hidden;position:relative}');
-  p('.chart-bar{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--g),#00c851);transition:width .4s ease;min-width:2px}');
-  p('.chart-bar.r{background:linear-gradient(90deg,var(--r),#ff6b6b)}');
-  p('.chart-val{font-size:12px;font-weight:700;color:var(--sub);width:54px;text-align:right;flex-shrink:0}');
-  p('.chart-section{margin-bottom:18px}');
   p('</style></head><body>');
 
   /* ── HEADER ──────────────────────────────────────────────── */
@@ -1538,9 +1189,7 @@ function buildAdminPage() {
   p('<div class="section-title">今日統計</div>');
   p('<div class="stat-grid six" id="statsEl">');
   p('  <div class="sbox"><div class="snum">—</div><div class="slbl">載入中</div></div>');
-  p('</div>');
-  p('<div id="chartEl" style="margin-top:14px"></div>');
-  p('</div>');
+  p('</div></div>');
 
   /* ── 訂單列表 ──────────────────────────────────────────────── */
   p('<div class="section">');
@@ -1635,46 +1284,7 @@ function buildAdminPage() {
   p('  var uM=unpaid.reduce(function(a,x){return a+x.total;},0);');
   p('  document.getElementById("statsEl").innerHTML=');
   p('    sb(act.length,"筆訂單","")+sb("$"+tot,"總金額","b")+sb("$"+pM,"已收款","g")+sb("$"+uM,"待收款","r")+sb(paid.length,"已付款","g")+sb(unpaid.length,"未付款","o");');
-  p('  renderChart(act);');
   p('}');
-
-  p('function renderChart(act){');
-  p('  var el=document.getElementById("chartEl");');
-  p('  if(!el||!act.length){if(el)el.innerHTML="";return;}');
-  p('  // 各店家統計');
-  p('  var stores={};');
-  p('  act.forEach(function(o){');
-  p('    if(!stores[o.store])stores[o.store]={total:0,qty:0};');
-  p('    stores[o.store].total+=o.total;');
-  p('    stores[o.store].qty+=o.qty;');
-  p('  });');
-  p('  var names=Object.keys(stores);');
-  p('  if(!names.length){el.innerHTML="";return;}');
-  p('  var maxTotal=Math.max.apply(null,names.map(function(k){return stores[k].total;}));');
-  p('  var maxQty=Math.max.apply(null,names.map(function(k){return stores[k].qty;}));');
-  p('  function mkBar(val,max,cls,unit){');
-  p('    var pct=max>0?Math.round(val/max*100):0;');
-  p('    return \'<div class="chart-bar \'+cls+\'" style="width:\'+pct+\'%"></div>\';');
-  p('  }');
-  p('  var h=\'<div class="chart-title">各店家金額</div>\';');
-  p('  names.forEach(function(k){');
-  p('    h+=\'<div class="chart-row">\'+');
-  p('      \'<div class="chart-lbl" title="\'+esc(k)+\'">\'+ esc(k)+\'</div>\'+');
-  p('      \'<div class="chart-bar-wrap">\'+ mkBar(stores[k].total,maxTotal,"","$")+\'</div>\'+');
-  p('      \'<div class="chart-val">$\'+stores[k].total+\'</div>\'+');
-  p('    \'</div>\';');
-  p('  });');
-  p('  h+=\'<div class="chart-title" style="margin-top:14px">各店家份數</div>\';');
-  p('  names.forEach(function(k){');
-  p('    h+=\'<div class="chart-row">\'+');
-  p('      \'<div class="chart-lbl" title="\'+esc(k)+\'">\'+ esc(k)+\'</div>\'+');
-  p('      \'<div class="chart-bar-wrap">\'+ mkBar(stores[k].qty,maxQty,"r","份")+\'</div>\'+');
-  p('      \'<div class="chart-val">\'+stores[k].qty+\'份</div>\'+');
-  p('    \'</div>\';');
-  p('  });');
-  p('  el.innerHTML=\'<div class="chart-section">\'+h+\'</div>\';');
-  p('}');
-
   p('function sb(n,l,cls){return \'<div class="sbox hi\'+(cls?" "+cls:"")+\'"><div class="snum">\'+n+\'</div><div class="slbl">\'+l+\'</div></div>\';}');
 
   /* render table */
@@ -1769,8 +1379,7 @@ function buildAdminPage() {
   p('  if(!act.length){alert("今日無訂單");return;}');
   p('  var cnt={};');
   p('  act.forEach(function(o){var k=o.item+(o.spec?"（"+o.spec+"）":"");cnt[k]=(cnt[k]||0)+o.qty;});');
-  p('  var dl=document.getElementById("dateF").value||"今日";');
-  p('  var lines=["您好，"+dl+" 訂購如下：",""];');
+  p('  var lines=["您好，今天訂購如下：",""];');
   p('  var n=0;');
   p('  Object.keys(cnt).forEach(function(k){lines.push(k+" x"+cnt[k]);n+=cnt[k];});');
   p('  var m=act.reduce(function(a,o){return a+o.total;},0);');
@@ -1828,31 +1437,20 @@ app.post('/webhook', async (req, res) => {
       if (!isAdmin(uid)) { await reply('只有管理員可以開單'); return res.sendStatus(200); }
       isOpen = true;
       scheduleAutoClose(Number(autoOpen[1]));
-      await loadTextMenu();
-      const menuStr = buildMenuMessage(textMenuCache);
-      const autoMsg = '🟢 開始點餐！\n⏰ 將於 '+autoOpen[1]+' 分鐘後自動結單\n\n' + menuStr;
-      await reply(autoMsg);
-      pushToGroup(autoMsg);
+      await reply('已開單！將於 '+autoOpen[1]+' 分鐘後自動結單\n點餐頁：'+(process.env.LIFF_URL||''));
       return res.sendStatus(200);
     }
     if (text === '開單') {
       if (!isAdmin(uid)) { await reply('只有管理員可以開單'); return res.sendStatus(200); }
       if (isOpen) { await reply('目前已開單中'); return res.sendStatus(200); }
       isOpen = true;
-      await loadTextMenu();
-      const menuStr = buildMenuMessage(textMenuCache);
-      const openMsg = '🟢 開始點餐！\n\n' + menuStr;
-      await reply(openMsg);
-      pushToGroup(openMsg);
+      await reply('已開單，可以開始點餐 🍱\n點餐頁：'+(process.env.LIFF_URL||''));
       return res.sendStatus(200);
     }
     if (text === '結單' || text === '收單' || text === '統計') {
       if (!isAdmin(uid)) { await reply('只有管理員可以結單/統計'); return res.sendStatus(200); }
       isOpen = false; cancelAutoClose();
-      textMenuCache = [];
-      const stat = await buildStatReport();
-      await reply(stat);
-      pushToGroup('🔴 已收單！\n\n' + stat);
+      await reply(await buildStatReport());
       return res.sendStatus(200);
     }
     if (text === '店家單') {
@@ -1876,116 +1474,6 @@ app.post('/webhook', async (req, res) => {
       await reply(msg);
       return res.sendStatus(200);
     }
-
-    // ── 管理員指令：查看訂單 ─────────────────────────────────────
-    if (text === '查看訂單' || text === '訂單') {
-      if (!isAdmin(uid)) { await reply('只有管理員可以查看'); return res.sendStatus(200); }
-      await reply(await buildDetailedReport());
-      return res.sendStatus(200);
-    }
-
-    // ── 管理員指令：匯出 ────────────────────────────────────────
-    if (text === '匯出' || text === '匯出訂單') {
-      if (!isAdmin(uid)) { await reply('只有管理員可以匯出'); return res.sendStatus(200); }
-      await reply(await buildExportText());
-      return res.sendStatus(200);
-    }
-
-    // ── 管理員指令：XXX 已付款 ───────────────────────────────────
-    const paidMatch = text.match(/^(.+?)\s*已付款$/);
-    if (paidMatch && isAdmin(uid)) {
-      const targetName = paidMatch[1].trim();
-      const count = await markPaidByName(targetName);
-      if (count > 0) {
-        await reply(targetName + ' 已標記付款（' + count + ' 筆）✅');
-      } else {
-        await reply('找不到 ' + targetName + ' 的未付款訂單');
-      }
-      return res.sendStatus(200);
-    }
-
-    // ── 使用者指令：我的訂單 ────────────────────────────────────
-    if (text === '我的訂單' || text === '我點了什麼') {
-      const myOrders = await getMyTextOrders(uid);
-      if (!myOrders.length) {
-        await reply('你今天還沒有訂單');
-      } else {
-        let msg = '📋 你的訂單：\n';
-        let total = 0;
-        for (const o of myOrders) {
-          msg += '• ' + o.item;
-          if (o.qty > 1) msg += ' ×' + o.qty;
-          if (o.note) msg += '（' + o.note + '）';
-          msg += '　$' + o.total;
-          if (o.status === '已付款') msg += ' ✅';
-          msg += '\n';
-          total += o.total;
-        }
-        msg += '合計：$' + total;
-        await reply(msg);
-      }
-      return res.sendStatus(200);
-    }
-
-    // ── 使用者指令：菜單 ────────────────────────────────────────
-    if (text === '菜單' || text === '今日菜單') {
-      if (!isOpen) {
-        await reply('目前尚未開團，請等待管理員開團 🍱');
-        return res.sendStatus(200);
-      }
-      const menu = textMenuCache.length ? textMenuCache : await loadTextMenu();
-      await reply(buildMenuMessage(menu));
-      return res.sendStatus(200);
-    }
-
-    // ── 使用者指令：取消訂單 ────────────────────────────────────
-    if (text === '取消' || text === '取消訂單') {
-      if (!isOpen) { await reply('目前未開團'); return res.sendStatus(200); }
-      try {
-        await authSheet();
-        const s = doc.sheetsByTitle['Orders'];
-        const rows = await s.getRows();
-        const today = todayTW();
-        let count = 0;
-        for (const r of rows) {
-          if (String(r['userId']||'')===String(uid) && String(r['時間']||'').startsWith(today) && String(r['狀態']||'')==='未付款') {
-            r['狀態']='已刪除'; await r.save(); count++;
-          }
-        }
-        await reply(count > 0 ? '已取消你的訂單（' + count + ' 筆）' : '找不到可取消的訂單');
-      } catch(e) {
-        await reply('取消失敗，請聯絡管理員');
-      }
-      return res.sendStatus(200);
-    }
-
-    // ── 開團時：純數字訂餐（e.g. "2", "2不要菜", "3+2加辣"）────
-    if (isOpen && textMenuCache.length) {
-      const parsed = parseTextOrder(text, textMenuCache);
-      if (parsed) {
-        const result = await saveTextOrder(profileName, uid, parsed);
-        if (result.success) {
-          const action = result.action === 'updated' ? '已更新' : '已收到';
-          let msg = action + ' 你的訂單 ✅\n';
-          msg += parsed.item;
-          if (parsed.qty > 1) msg += ' ×' + parsed.qty;
-          if (parsed.note) msg += '（' + parsed.note + '）';
-          msg += '\n金額：$' + (parsed.price * parsed.qty);
-          msg += '\n\n輸入"我的訂單"查看，輸入"取消"可取消';
-          await reply(msg);
-        } else {
-          await reply('訂單失敗，請重試或聯絡管理員');
-        }
-        return res.sendStatus(200);
-      }
-    }
-
-    // ── 開團中但看不懂的訊息：給提示 ───────────────────────────
-    if (isOpen && textMenuCache.length) {
-      await reply('請輸入數字點餐，例如"2"或"2不要菜"\n輸入"菜單"可重看菜單');
-      return res.sendStatus(200);
-    }
-
     return res.sendStatus(200);
   } catch(err) {
     console.error('Webhook error:', err);
