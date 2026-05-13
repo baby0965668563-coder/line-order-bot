@@ -327,6 +327,10 @@ async function getAllOrdersToday() {
   }
 }
 
+function isSpicy(note) {
+  return String(note || '').includes('辣') || String(note || '').includes('🌶');
+}
+
 async function buildStatReport() {
   const orders = await getAllOrdersToday();
   const active = orders.filter(o => o.status !== '已刪除');
@@ -334,11 +338,16 @@ async function buildStatReport() {
   if (!active.length) return '📊 今日尚無訂單';
 
   const itemCount = {};
+  const spicyCount = {};
   const userTotal = {};
   const unpaid = new Set();
 
   for (const o of active) {
     itemCount[o.item] = (itemCount[o.item] || 0) + o.qty;
+
+    if (isSpicy(o.note)) {
+      spicyCount[o.item] = (spicyCount[o.item] || 0) + o.qty;
+    }
 
     const name = o.name || '未知';
     userTotal[name] = (userTotal[name] || 0) + o.total;
@@ -346,12 +355,17 @@ async function buildStatReport() {
     if (o.status === '未付款') unpaid.add(name);
   }
 
-  let msg = '📊 今日訂餐統計\n';
+  let msg = '🔴 已收單！\n\n';
+  msg += '📊 今日訂餐統計\n';
   msg += '─────────────\n';
   msg += '【品項數量】\n';
 
   for (const item in itemCount) {
-    msg += item + ' x' + itemCount[item] + '\n';
+    msg += item + ' ×' + itemCount[item] + '\n';
+
+    if (spicyCount[item]) {
+      msg += item + '（辣）×' + spicyCount[item] + '\n';
+    }
   }
 
   msg += '\n【個人金額】\n';
@@ -426,9 +440,14 @@ async function buildShopOrder() {
   if (!active.length) return '今日尚無訂單';
 
   const itemCount = {};
+  const spicyCount = {};
 
   for (const o of active) {
     itemCount[o.item] = (itemCount[o.item] || 0) + o.qty;
+
+    if (isSpicy(o.note)) {
+      spicyCount[o.item] = (spicyCount[o.item] || 0) + o.qty;
+    }
   }
 
   let msg = '您好，今天訂購如下：\n\n';
@@ -436,6 +455,11 @@ async function buildShopOrder() {
 
   for (const item in itemCount) {
     msg += item + ' x' + itemCount[item] + '\n';
+
+    if (spicyCount[item]) {
+      msg += item + '（辣）x' + spicyCount[item] + '\n';
+    }
+
     totalQty += itemCount[item];
   }
 
@@ -511,7 +535,7 @@ function scheduleAutoClose(minutes) {
     textMenuCache = [];
 
     const stat = await buildStatReport().catch(() => '統計失敗');
-    await pushToGroup('🔴 已自動結單！\n\n' + stat);
+    await pushToGroup(stat);
   }, ms);
 }
 
@@ -670,7 +694,7 @@ app.post('/webhook', async (req, res) => {
         textMenuCache = [];
 
         const stat = await buildStatReport();
-        await reply('🔴 已收單！\n\n' + stat);
+        await reply(stat);
         continue;
       }
 
