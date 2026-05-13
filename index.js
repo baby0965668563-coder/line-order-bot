@@ -686,20 +686,24 @@ if (text.includes('$')) {
 
     for (const p of parsedList) {
 
-      const result = await saveTextOrder(
-        p.name,
-        'legacy_' + p.name,
-        {
-          item: p.item,
-          store: '手動輸入',
-          price: p.price,
-          qty: p.qty,
-          note: p.note
-        }
-      );
+  console.log('準備寫入', p);
 
-      if (result.success) ok++;
+  const result = await saveTextOrder(
+    p.name,
+    'legacy_' + p.name,
+    {
+      item: p.item,
+      store: '手動輸入',
+      price: p.price,
+      qty: p.qty,
+      note: p.note
     }
+  );
+
+  console.log('寫入結果', result);
+
+  if (result.success) ok++;
+}
 
     await reply(
       '✅ 已匯入 ' + ok + ' 筆舊版訂單'
