@@ -1,8 +1,8 @@
-require(‘dotenv’).config();
+require('dotenv').config();
 
-const express = require(‘express’);
-const line = require('@line/bot-sdk;
-  const { GoogleSpreadsheet } = require('google-spreadsheet');
+const express = require('express');
+const line = require('@line/bot-sdk');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
 
 const app = express();
 
