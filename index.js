@@ -1,8 +1,47 @@
+require('dotenv').config();
 
-app.use('/api',    express.json());
-app.use('/admin',  express.json());
+const express = require('express');
+const line = require('@line/bot-sdk');
+
+const app = express();
+
+const lineConfig = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET
+};
+
+app.use('/webhook', line.middleware(lineConfig));
+app.use('/api', express.json());
 
 const client = new line.Client(lineConfig);
+
+app.post('/webhook', (req, res) => {
+  Promise
+    .all(req.body.events.map(handleEvent))
+    .then(() => res.status(200).end())
+    .catch(err => {
+      console.error(err);
+      res.status(500).end();
+    });
+});
+
+async function handleEvent(event) {
+
+  if (event.type === 'message' && event.message.type === 'text') {
+
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '收到訊息了！'
+    });
+
+  }
+
+  return null;
+}
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log('Server running');
+});
 const doc    = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 // ════════════════════════════════════════════════════════════════
