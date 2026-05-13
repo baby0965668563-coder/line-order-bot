@@ -111,7 +111,6 @@ function buildMenuMessage(menuList) {
 }
 
 function normalizeOrderText(text) {
-
   return String(text || '')
     .replace(/1️⃣/g, '1')
     .replace(/2️⃣/g, '2')
@@ -123,7 +122,6 @@ function normalizeOrderText(text) {
     .replace(/8️⃣/g, '8')
     .replace(/9️⃣/g, '9')
     .replace(/🔟/g, '10')
-
     .replace(/０/g, '0')
     .replace(/１/g, '1')
     .replace(/２/g, '2')
@@ -134,38 +132,23 @@ function normalizeOrderText(text) {
     .replace(/７/g, '7')
     .replace(/８/g, '8')
     .replace(/９/g, '9')
-
     .replace(/＋/g, '+')
-
     .trim();
 }
 
 function parseTextOrder(text, menuList) {
-
   const normalized = normalizeOrderText(text);
 
-  const m = normalized.match(
-    /^([0-9]{1,2})(?:\+([0-9]{1,2}))?(.*)$/
-  );
-
+  const m = normalized.match(/^([0-9]{1,2})(?:\+([0-9]{1,2}))?(.*)$/);
   if (!m) return null;
 
   const no = parseInt(m[1], 10);
-
   if (isNaN(no)) return null;
 
-  const qty = Math.min(
-    20,
-    Math.max(
-      1,
-      parseInt(m[2] || '1', 10)
-    )
-  );
-
+  const qty = Math.min(20, Math.max(1, parseInt(m[2] || '1', 10)));
   const note = String(m[3] || '').trim();
 
   const item = menuList.find(x => x.no === no);
-
   if (!item) return null;
 
   return {
@@ -176,6 +159,42 @@ function parseTextOrder(text, menuList) {
     qty,
     note
   };
+}
+
+function parseLegacyOrders(text) {
+  const lines = String(text || '')
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  let currentItem = null;
+  const results = [];
+
+  for (const line of lines) {
+    const itemMatch = line.match(/^(.+?)\s*\$(\d+)/);
+
+    if (itemMatch) {
+      currentItem = {
+        item: itemMatch[1].trim(),
+        price: Number(itemMatch[2])
+      };
+      continue;
+    }
+
+    const orderMatch = line.match(/^(.+?)\s*\+(\d+)\s*(.*)$/);
+
+    if (orderMatch && currentItem) {
+      results.push({
+        name: orderMatch[1].trim(),
+        qty: Number(orderMatch[2]),
+        note: String(orderMatch[3] || '').trim(),
+        item: currentItem.item,
+        price: currentItem.price
+      });
+    }
+  }
+
+  return results;
 }
 
 async function saveUserToSheet(name, userId, sourceType, groupId) {
@@ -628,90 +647,7 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
-        function parseLegacyOrders(text) {
-
-  const lines = text
-    .split('\n')
-    .map(v => v.trim())
-    .filter(Boolean);
-
-  let currentItem = null;
-
-  const results = [];
-
-  for (const line of lines) {
-
-    const itemMatch = line.match(
-      /^(.+?)\s*\$(\d+)/
-    );
-
-    if (itemMatch) {
-
-      currentItem = {
-        item: itemMatch[1].trim(),
-        price: Number(itemMatch[2])
-      };
-
-      continue;
-    }
-
-    const orderMatch = line.match(
-      /^(.+?)\s*\+(\d+)\s*(.*)$/
-    );
-
-    if (orderMatch && currentItem) {
-
-      results.push({
-        name: orderMatch[1].trim(),
-        qty: Number(orderMatch[2]),
-        note: (orderMatch[3] || '').trim(),
-        item: currentItem.item,
-        price: currentItem.price
-      });
-
-    }
-  }
-
-  return results;
-}
-        
         if (isOpen) {
-if (text.includes('$')) {
-
-  const parsedList = parseLegacyOrders(text);
-
-  if (parsedList.length) {
-
-    let ok = 0;
-
-    for (const p of parsedList) {
-
-  console.log('準備寫入', p);
-
-  const result = await saveTextOrder(
-    p.name,
-    'legacy_' + p.name,
-    {
-      item: p.item,
-      store: '手動輸入',
-      price: p.price,
-      qty: p.qty,
-      note: p.note
-    }
-  );
-
-  console.log('寫入結果', result);
-
-  if (result.success) ok++;
-}
-
-    await reply(
-      '✅ 已匯入 ' + ok + ' 筆舊版訂單'
-    );
-
-    continue;
-  }
-}
           await reply('目前已開單中');
           continue;
         }
@@ -830,6 +766,33 @@ if (text.includes('$')) {
       }
 
       if (isOpen) {
+        if (text.includes('$')) {
+          const parsedList = parseLegacyOrders(text);
+
+          if (parsedList.length) {
+            let ok = 0;
+
+            for (const p of parsedList) {
+              const result = await saveTextOrder(
+                p.name,
+                'legacy_' + p.name,
+                {
+                  item: p.item,
+                  store: '手動輸入',
+                  price: p.price,
+                  qty: p.qty,
+                  note: p.note
+                }
+              );
+
+              if (result.success) ok++;
+            }
+
+            await reply('✅ 已匯入 ' + ok + ' 筆舊版訂單');
+            continue;
+          }
+        }
+
         const menu = textMenuCache.length ? textMenuCache : await loadTextMenu();
         const parsed = parseTextOrder(text, menu);
 
@@ -841,8 +804,10 @@ if (text.includes('$')) {
 
             let msg = action + ' 你的訂單 ✅\n';
             msg += parsed.item;
+
             if (parsed.qty > 1) msg += ' ×' + parsed.qty;
             if (parsed.note) msg += '（' + parsed.note + '）';
+
             msg += '\n金額：$' + parsed.price * parsed.qty;
             msg += '\n\n輸入「我的訂單」查看，輸入「取消」可取消';
 
@@ -854,7 +819,15 @@ if (text.includes('$')) {
           continue;
         }
 
-        await reply('請輸入數字點餐，例如：\n2\n2不要菜\n2+3\n\n輸入「菜單」可重看菜單');
+        await reply(
+          '請輸入數字點餐，例如：\n' +
+          '2\n' +
+          '2不要菜\n' +
+          '2+3\n\n' +
+          '或貼上舊格式：\n' +
+          '原味蔥肉餅 $45\n' +
+          '悅容+1 辣'
+        );
         continue;
       }
 
