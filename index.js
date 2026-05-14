@@ -220,7 +220,7 @@ async function getAllOrdersToday() {
       )
       .map(r => ({
         row: r,
-        name: String(r['LINE名稱'] || ''),
+        name: String(r['LINE名稱'] || '').trim(),
         userId: String(r['userId'] || ''),
         store: String(r['店家'] || ''),
         item: String(r['品項'] || ''),
@@ -236,14 +236,13 @@ async function getAllOrdersToday() {
   }
 }
 
-function isSpicy(note) {
-  const n = String(note || '');
-  if (n.includes('不辣')) return false;
-  return n.includes('辣') || n.includes('🌶');
-}
+function getSpicyType(note) {
+  const n = String(note || '').replace(/\s/g, '');
 
-function isNotSpicy(note) {
-  return String(note || '').includes('不辣');
+  if (n.includes('不辣')) return '不辣';
+  if (/辣|🌶|（辣）|\(辣\)/.test(n)) return '辣';
+
+  return '一般';
 }
 
 async function buildDetailedReport() {
@@ -287,8 +286,6 @@ async function buildStatReport() {
   }
 
   const itemCount = {};
-  const spicyCount = {};
-  const notSpicyCount = {};
   const userTotal = {};
   const unpaid = new Set();
 
@@ -297,18 +294,13 @@ async function buildStatReport() {
 
   for (const o of orders) {
     const item = o.item || '未指定品項';
+    const spicyType = getSpicyType(o.note);
+    const itemKey = spicyType === '一般' ? item : `${item}（${spicyType}）`;
 
-    itemCount[item] = (itemCount[item] || 0) + o.qty;
+    itemCount[itemKey] = (itemCount[itemKey] || 0) + o.qty;
+
     totalQty += o.qty;
     totalMoney += o.total;
-
-    if (isSpicy(o.note)) {
-      spicyCount[item] = (spicyCount[item] || 0) + o.qty;
-    }
-
-    if (isNotSpicy(o.note)) {
-      notSpicyCount[item] = (notSpicyCount[item] || 0) + o.qty;
-    }
 
     const name = o.name || '未知';
     userTotal[name] = (userTotal[name] || 0) + o.total;
@@ -322,15 +314,7 @@ async function buildStatReport() {
 
   msg += '【品項數量】\n';
   for (const item in itemCount) {
-    msg += `${item} ×${itemCount[item]}\n`;
-
-    if (spicyCount[item]) {
-      msg += `　辣 ×${spicyCount[item]}\n`;
-    }
-
-    if (notSpicyCount[item]) {
-      msg += `　不辣 ×${notSpicyCount[item]}\n`;
-    }
+    msg += `${item} × ${itemCount[item]}\n`;
   }
 
   msg += `\n總份數：${totalQty} 份`;
@@ -362,26 +346,19 @@ async function buildShopOrder() {
   if (!orders.length) return '今日尚無訂單';
 
   const itemCount = {};
-  const spicyCount = {};
-  const notSpicyCount = {};
 
   let totalQty = 0;
   let totalMoney = 0;
 
   for (const o of orders) {
     const item = o.item || '未指定品項';
+    const spicyType = getSpicyType(o.note);
+    const itemKey = spicyType === '一般' ? item : `${item}（${spicyType}）`;
 
-    itemCount[item] = (itemCount[item] || 0) + o.qty;
+    itemCount[itemKey] = (itemCount[itemKey] || 0) + o.qty;
+
     totalQty += o.qty;
     totalMoney += o.total;
-
-    if (isSpicy(o.note)) {
-      spicyCount[item] = (spicyCount[item] || 0) + o.qty;
-    }
-
-    if (isNotSpicy(o.note)) {
-      notSpicyCount[item] = (notSpicyCount[item] || 0) + o.qty;
-    }
   }
 
   let msg = '您好，今天訂購如下：\n\n';
@@ -391,14 +368,6 @@ async function buildShopOrder() {
       msg += `總共 ${itemCount[item]} 份\n`;
     } else {
       msg += `${item} x${itemCount[item]}\n`;
-    }
-
-    if (spicyCount[item]) {
-      msg += `辣 x${spicyCount[item]}\n`;
-    }
-
-    if (notSpicyCount[item]) {
-      msg += `不辣 x${notSpicyCount[item]}\n`;
     }
   }
 
@@ -419,10 +388,7 @@ async function markPaidByName(name) {
     let count = 0;
 
     for (const o of orders) {
-      if (
-        o.name.trim() === name.trim() &&
-        o.status === '未付款'
-      ) {
+      if (o.name.trim() === name.trim() && o.status === '未付款') {
         o.row['狀態'] = '已付款';
         o.row['付款時間'] = nowTW();
         o.row['付款方式'] = '現金';
@@ -436,6 +402,35 @@ async function markPaidByName(name) {
     console.error('markPaidByName fail:', e.message);
     return 0;
   }
+}
+
+async function cancelPaidByName(name) {
+  try {
+    const orders = await getAllOrdersToday();
+    let count = 0;
+
+    for (const o of orders) {
+      if (o.name.trim() === name.trim() && o.status === '已付款') {
+        o.row['狀態'] = '未付款';
+        o.row['付款時間'] = '';
+        o.row['付款方式'] = '';
+        await o.row.save();
+        count++;
+      }
+    }
+
+    return count;
+  } catch (e) {
+    console.error('cancelPaidByName fail:', e.message);
+    return 0;
+  }
+}
+
+function splitNames(text) {
+  return String(text || '')
+    .split(/[、,\s]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
 }
 
 function getMillisecondsUntil(timeText) {
@@ -587,6 +582,62 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
+      const paidFront = text.match(/^已付款\s+(.+)$/);
+      if (paidFront && isAdmin(uid)) {
+        const names = splitNames(paidFront[1]);
+        const done = [];
+
+        for (const name of names) {
+          const count = await markPaidByName(name);
+          if (count > 0) done.push(`${name}(${count})`);
+        }
+
+        await reply(done.length ? `已標記付款：${done.join('、')} ✅` : '找不到未付款訂單');
+        continue;
+      }
+
+      const paidBack = text.match(/^(.+?)\s*已付款$/);
+      if (paidBack && isAdmin(uid)) {
+        const targetName = paidBack[1].trim();
+        const count = await markPaidByName(targetName);
+
+        if (count > 0) {
+          await reply(`${targetName} 已標記付款（${count} 筆）✅`);
+        } else {
+          await reply(`找不到 ${targetName} 的未付款訂單`);
+        }
+
+        continue;
+      }
+
+      const cancelPaidFront = text.match(/^取消付款\s+(.+)$/);
+      if (cancelPaidFront && isAdmin(uid)) {
+        const names = splitNames(cancelPaidFront[1]);
+        const done = [];
+
+        for (const name of names) {
+          const count = await cancelPaidByName(name);
+          if (count > 0) done.push(`${name}(${count})`);
+        }
+
+        await reply(done.length ? `已取消付款：${done.join('、')}` : '找不到已付款訂單');
+        continue;
+      }
+
+      const cancelPaidBack = text.match(/^(.+?)\s*取消付款$/);
+      if (cancelPaidBack && isAdmin(uid)) {
+        const targetName = cancelPaidBack[1].trim();
+        const count = await cancelPaidByName(targetName);
+
+        if (count > 0) {
+          await reply(`${targetName} 已改回未付款（${count} 筆）`);
+        } else {
+          await reply(`找不到 ${targetName} 的已付款訂單`);
+        }
+
+        continue;
+      }
+
       const slashOpen = text.match(/^\/開單\s+(\d{1,2}:\d{2})$/);
 
       if (slashOpen) {
@@ -696,21 +747,6 @@ app.post('/webhook', async (req, res) => {
         }
 
         await reply(await buildShopOrder());
-        continue;
-      }
-
-      const paidMatch = text.match(/^(.+?)\s*已付款$/);
-
-      if (paidMatch && isAdmin(uid)) {
-        const targetName = paidMatch[1].trim();
-        const count = await markPaidByName(targetName);
-
-        if (count > 0) {
-          await reply(`${targetName} 已標記付款（${count} 筆）✅`);
-        } else {
-          await reply(`找不到 ${targetName} 的未付款訂單`);
-        }
-
         continue;
       }
 
