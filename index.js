@@ -1,826 +1,367 @@
-require('dotenv').config();
+require(‘dotenv’).config();
 
-const express = require('express');
-const line = require('@line/bot-sdk');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
+const express = require(‘express’);
+const line    = require(’@line/bot-sdk’);
+const { GoogleSpreadsheet } = require(‘google-spreadsheet’);
 
 const app = express();
 
 const lineConfig = {
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET
+channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+channelSecret:      process.env.CHANNEL_SECRET
 };
 
-app.use('/webhook', line.middleware(lineConfig));
-app.use('/api', express.json());
-app.use('/admin', express.json());
+app.use(’/webhook’, line.middleware(lineConfig));
+app.use(express.json());
 
 const client = new line.Client(lineConfig);
-const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
+const doc    = new GoogleSpreadsheet(process.env.SHEET_ID);
 
-let isOpen = false;
+// ════════════════════════════════════════════════════════════════
+//  全域狀態
+// ════════════════════════════════════════════════════════════════
+let isOpen        = false;
 let autoCloseTimer = null;
-let autoCloseAt = null;
-let sheetReady = false;
+let todayOrders   = [];   // [{ name, qty, note, time }]
+let menuText      = ‘’;   // 今日菜單文字（可選）
 
-const admins = [
-  'U8d9c82446aa9eb90d7de001cfc7ea90f',
-  'Ubcfae64b443b9fad21bbc584e991b306',
-  'U5c44a04efc62664bd45ec80d77be7d93',
-  'Uc669eca67bf477460945f45751edd3e9'
-];
+const ADMINS = (process.env.ADMIN_IDS || ‘’).split(’,’).map(s => s.trim()).filter(Boolean);
 
 function isAdmin(uid) {
-  return admins.includes(uid);
+return ADMINS.includes(uid);
 }
 
+// ════════════════════════════════════════════════════════════════
+//  工具
+// ════════════════════════════════════════════════════════════════
 function nowTW() {
-  return new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+return new Date().toLocaleString(‘zh-TW’, { timeZone: ‘Asia/Taipei’ });
 }
 
 function todayTW() {
-  return new Date().toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
+return new Date().toLocaleDateString(‘zh-TW’, { timeZone: ‘Asia/Taipei’ });
 }
 
+// ════════════════════════════════════════════════════════════════
+//  Google Sheets
+// ════════════════════════════════════════════════════════════════
 async function authSheet() {
-  if (sheetReady) return;
-
-  await doc.useServiceAccountAuth({
-    client_email: process.env.GOOGLE_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-  });
-
-  await doc.loadInfo();
-  sheetReady = true;
+await doc.useServiceAccountAuth({
+client_email: process.env.GOOGLE_CLIENT_EMAIL,
+private_key:  process.env.GOOGLE_PRIVATE_KEY.replace(/\n/g, ‘\n’)
+});
+await doc.loadInfo();
 }
 
-async function getProfileName(event, uid) {
+async function writeOrder(name, qty, note) {
+try {
+await authSheet();
+const sheet = doc.sheetsByTitle[‘Orders’];
+if (!sheet) {
+console.error(‘Orders sheet not found’);
+return;
+}
+await sheet.addRow({
+‘time’:  nowTW(),
+‘name’:  name,
+‘qty’:   qty,
+‘note’:  note || ‘’
+});
+} catch (e) {
+console.error(‘writeOrder fail:’, e.message);
+}
+}
+
+// ════════════════════════════════════════════════════════════════
+//  解析訂單文字
+//  支援格式：
+//    慧玲+1
+//    阿明+2辣
+//    慧玲 +1
+//    慧玲+1 不辣
+//    慧玲 + 1 加蛋少冰
+// ════════════════════════════════════════════════════════════════
+function parseOrder(text) {
+// 去除前後空白
+const t = text.trim();
+
+// 格式：姓名 + 數量 [備註]
+// 姓名：非數字、非+的文字（至少1字）
+// 數量：1-2位數字
+// 備註：剩餘文字（可空）
+const m = t.match(/^([^\d+＋]+?)\s*[+＋]\s*([0-9]{1,2})\s*(.*)$/);
+if (!m) return null;
+
+const name = m[1].trim();
+const qty  = parseInt(m[2], 10);
+const note = m[3].trim();
+
+if (!name || qty < 1 || qty > 20) return null;
+
+return { name, qty, note };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  收單動作
+// ════════════════════════════════════════════════════════════════
+async function doClose(targetGroupId) {
+isOpen = false;
+if (autoCloseTimer) {
+clearTimeout(autoCloseTimer);
+autoCloseTimer = null;
+}
+
+const gid = targetGroupId || process.env.LINE_GROUP_ID || ‘’;
+if (gid) {
+try {
+await client.pushMessage(gid, {
+type: ‘text’,
+text: ‘📦 已收單\n感謝大家訂購 🙏’
+});
+} catch (e) {
+console.error(‘doClose push fail:’, e.message);
+}
+}
+}
+
+// ════════════════════════════════════════════════════════════════
+//  解析 /開單 指令的時間
+//  支援：/開單 19:30  /開單 7:30  /開單 1930
+// ════════════════════════════════════════════════════════════════
+function parseCloseTime(text) {
+const m = text.match(/(\d{1,2})[：:.]?(\d{2})/);
+if (!m) return null;
+return { hour: parseInt(m[1], 10), minute: parseInt(m[2], 10) };
+}
+
+function msUntil(hour, minute) {
+const now = new Date(new Date().toLocaleString(‘en-US’, { timeZone: ‘Asia/Taipei’ }));
+const target = new Date(now);
+target.setHours(hour, minute, 0, 0);
+if (target <= now) target.setDate(target.getDate() + 1);
+return target - now;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  格式化查單回覆
+// ════════════════════════════════════════════════════════════════
+function buildOrderList() {
+if (!todayOrders.length) return ‘目前沒有訂單’;
+
+let lines = [‘📋 今日訂單’];
+for (const o of todayOrders) {
+let line = o.name + ’ +’ + o.qty;
+if (o.note) line += ’ ’ + o.note;
+lines.push(line);
+}
+const total = todayOrders.reduce((s, o) => s + o.qty, 0);
+lines.push(’’);
+lines.push(‘共 ’ + total + ’ 份’);
+return lines.join(’\n’);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  格式化店家單
+// ════════════════════════════════════════════════════════════════
+function buildShopMsg() {
+if (!todayOrders.length) return ‘目前沒有訂單’;
+
+const total = todayOrders.reduce((s, o) => s + o.qty, 0);
+
+// 統計備註
+const noteCount = {};
+let noNoteQty = 0;
+for (const o of todayOrders) {
+if (o.note) {
+noteCount[o.note] = (noteCount[o.note] || 0) + o.qty;
+} else {
+noNoteQty += o.qty;
+}
+}
+
+let lines = [‘您好，今天訂購如下：’, ‘’];
+lines.push(‘總共 ’ + total + ’ 份’);
+if (noNoteQty > 0) lines.push(‘原味 ’ + noNoteQty + ’ 份’);
+for (const note in noteCount) {
+lines.push(note + ’ ’ + noteCount[note] + ’ 份’);
+}
+lines.push(’’);
+lines.push(‘謝謝’);
+return lines.join(’\n’);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Webhook
+// ════════════════════════════════════════════════════════════════
+app.post(’/webhook’, async (req, res) => {
+res.sendStatus(200); // 先回 200，避免 LINE timeout
+
+try {
+const events = req.body.events || [];
+for (const event of events) {
+if (event.type !== ‘message’ || event.message.type !== ‘text’) continue;
+
+```
+  const text  = event.message.text.trim();
+  const uid   = event.source.userId;
+  const srcType = event.source.type;
+  const groupId = event.source.groupId || '';
+
+  const replyToken = event.replyToken;
+
+  const reply = async (msg) => {
+    try {
+      await client.replyMessage(replyToken, { type: 'text', text: msg });
+    } catch (e) {
+      console.error('reply fail:', e.message);
+    }
+  };
+
+  // ── 取得發言者名稱 ─────────────────────────────────────────
+  let senderName = '';
   try {
-    if (event.source.type === 'group') {
-      const p = await client.getGroupMemberProfile(event.source.groupId, uid);
-      return p.displayName || '未知使用者';
-    }
-
-    if (event.source.type === 'room') {
-      const p = await client.getRoomMemberProfile(event.source.roomId, uid);
-      return p.displayName || '未知使用者';
-    }
-
-    const p = await client.getProfile(uid);
-    return p.displayName || '未知使用者';
-  } catch (e) {
-    console.error('取得名稱失敗:', e.message);
-    return '未知使用者';
-  }
-}
-
-async function saveUserToSheet(name, userId, sourceType, groupId) {
-  try {
-    await authSheet();
-
-    let sheet = doc.sheetsByTitle['Users'];
-
-    if (!sheet) {
-      sheet = await doc.addSheet({
-        title: 'Users',
-        headerValues: ['時間', 'LINE名稱', 'userId', '來源類型', '群組ID', '權限']
-      });
-    }
-
-    await sheet.addRow({
-      時間: nowTW(),
-      LINE名稱: name,
-      userId: userId,
-      來源類型: sourceType,
-      群組ID: groupId || '',
-      權限: isAdmin(userId) ? 'admin' : 'user'
-    });
-  } catch (e) {
-    console.error('saveUserToSheet fail:', e.message);
-  }
-}
-
-function parseSimpleOrder(text) {
-  const clean = String(text || '').trim();
-  const match = clean.match(/^(.+?)\s*[＋+＊*]\s*(\d+)\s*(.*)$/);
-
-  if (!match) return null;
-
-  const name = match[1].trim();
-  const qty = Number(match[2]);
-  const note = String(match[3] || '').trim();
-
-  if (!name || !qty || qty <= 0) return null;
-
-  return { name, qty, note };
-}
-
-function parseLegacyOrders(text) {
-  const lines = String(text || '')
-    .split('\n')
-    .map(v => v.trim())
-    .filter(Boolean);
-
-  let currentItem = null;
-  const results = [];
-
-  for (const line of lines) {
-    const itemMatch = line.match(/^(.+?)\s*\$(\d+)/);
-
-    if (itemMatch) {
-      currentItem = {
-        item: itemMatch[1].trim(),
-        price: Number(itemMatch[2])
-      };
-      continue;
-    }
-
-    const orderMatch = line.match(/^(.+?)\s*[＋+＊*]\s*(\d+)\s*(.*)$/);
-
-    if (orderMatch && currentItem) {
-      results.push({
-        name: orderMatch[1].trim(),
-        qty: Number(orderMatch[2]),
-        note: String(orderMatch[3] || '').trim(),
-        item: currentItem.item,
-        price: currentItem.price
-      });
-    }
-  }
-
-  return results;
-}
-
-async function saveSimpleOrderToSheet(order, sourceUserId) {
-  try {
-    await authSheet();
-
-    let sheet = doc.sheetsByTitle['Orders'];
-
-    if (!sheet) {
-      sheet = await doc.addSheet({
-        title: 'Orders',
-        headerValues: [
-          '時間',
-          'LINE名稱',
-          'userId',
-          '店家',
-          '品項',
-          '規格',
-          '備註',
-          '數量',
-          '單價',
-          '總價',
-          '狀態',
-          '付款時間',
-          '付款方式',
-          '訂單備註'
-        ]
-      });
-    }
-
-    await sheet.addRow({
-      時間: nowTW(),
-      LINE名稱: order.name,
-      userId: sourceUserId || '',
-      店家: order.store || '手動收單',
-      品項: order.item || '未指定品項',
-      規格: '',
-      備註: order.note || '',
-      數量: order.qty,
-      單價: order.price || 0,
-      總價: order.price ? order.price * order.qty : 0,
-      狀態: '未付款',
-      付款時間: '',
-      付款方式: '',
-      訂單備註: ''
-    });
-
-    return { success: true };
-  } catch (e) {
-    console.error('saveSimpleOrderToSheet fail:', e.message);
-    return { success: false, reason: e.message };
-  }
-}
-
-async function getAllOrdersToday() {
-  try {
-    await authSheet();
-
-    const sheet = doc.sheetsByTitle['Orders'];
-    if (!sheet) return [];
-
-    const rows = await sheet.getRows();
-    const today = todayTW();
-
-    return rows
-      .filter(r =>
-        String(r['時間'] || '').startsWith(today) &&
-        String(r['狀態'] || '') !== '已刪除'
-      )
-      .map(r => ({
-        row: r,
-        name: String(r['LINE名稱'] || '').trim(),
-        userId: String(r['userId'] || ''),
-        store: String(r['店家'] || ''),
-        item: String(r['品項'] || ''),
-        note: String(r['備註'] || ''),
-        qty: Number(r['數量'] || 1),
-        price: Number(r['單價'] || 0),
-        total: Number(r['總價'] || 0),
-        status: String(r['狀態'] || '未付款')
-      }));
-  } catch (e) {
-    console.error('getAllOrdersToday fail:', e.message);
-    return [];
-  }
-}
-
-function getSpicyType(note) {
-  const n = String(note || '').replace(/\s/g, '');
-
-  if (n.includes('不辣')) return '不辣';
-  if (/辣|🌶|（辣）|\(辣\)/.test(n)) return '辣';
-
-  return '一般';
-}
-
-async function buildDetailedReport() {
-  const orders = await getAllOrdersToday();
-
-  if (!orders.length) return '📋 今日尚無訂單';
-
-  let msg = '📋 今日訂單明細\n';
-  msg += '─────────────\n';
-
-  let totalQty = 0;
-  let totalMoney = 0;
-
-  for (const o of orders) {
-    totalQty += o.qty;
-    totalMoney += o.total;
-
-    msg += `${o.name} +${o.qty}`;
-    if (o.note) msg += ` ${o.note}`;
-    if (o.item && o.item !== '未指定品項') msg += `｜${o.item}`;
-    if (o.total > 0) msg += `｜$${o.total}`;
-    if (o.status === '已付款') msg += ' ✅';
-    msg += '\n';
-  }
-
-  msg += '─────────────\n';
-  msg += `共 ${totalQty} 份`;
-
-  if (totalMoney > 0) {
-    msg += `\n總金額：$${totalMoney}`;
-  }
-
-  return msg;
-}
-
-async function buildStatReport() {
-  const orders = await getAllOrdersToday();
-
-  if (!orders.length) {
-    return '📦 已收單\n\n📊 今日尚無訂單';
-  }
-
-  const itemCount = {};
-  const userTotal = {};
-  const unpaid = new Set();
-
-  let totalQty = 0;
-  let totalMoney = 0;
-
-  for (const o of orders) {
-    const item = o.item || '未指定品項';
-    const spicyType = getSpicyType(o.note);
-    const itemKey = spicyType === '一般' ? item : `${item}（${spicyType}）`;
-
-    itemCount[itemKey] = (itemCount[itemKey] || 0) + o.qty;
-
-    totalQty += o.qty;
-    totalMoney += o.total;
-
-    const name = o.name || '未知';
-    userTotal[name] = (userTotal[name] || 0) + o.total;
-
-    if (o.status === '未付款') unpaid.add(name);
-  }
-
-  let msg = '📦 已收單\n感謝大家訂購 🙏\n\n';
-  msg += '📊 今日訂餐統計\n';
-  msg += '─────────────\n';
-
-  msg += '【品項數量】\n';
-  for (const item in itemCount) {
-    msg += `${item} × ${itemCount[item]}\n`;
-  }
-
-  msg += `\n總份數：${totalQty} 份`;
-
-  if (totalMoney > 0) {
-    msg += `\n總金額：$${totalMoney}`;
-  }
-
-  if (Object.values(userTotal).some(v => v > 0)) {
-    msg += '\n\n【個人金額】\n';
-
-    for (const name in userTotal) {
-      if (userTotal[name] > 0) {
-        msg += `${name}：$${userTotal[name]}\n`;
-      }
-    }
-  }
-
-  if (unpaid.size) {
-    msg += '\n⚠️ 未付款：' + Array.from(unpaid).join('、');
-  }
-
-  return msg;
-}
-
-async function buildShopOrder() {
-  const orders = await getAllOrdersToday();
-
-  if (!orders.length) return '今日尚無訂單';
-
-  const itemCount = {};
-
-  let totalQty = 0;
-  let totalMoney = 0;
-
-  for (const o of orders) {
-    const item = o.item || '未指定品項';
-    const spicyType = getSpicyType(o.note);
-    const itemKey = spicyType === '一般' ? item : `${item}（${spicyType}）`;
-
-    itemCount[itemKey] = (itemCount[itemKey] || 0) + o.qty;
-
-    totalQty += o.qty;
-    totalMoney += o.total;
-  }
-
-  let msg = '您好，今天訂購如下：\n\n';
-
-  for (const item in itemCount) {
-    if (item === '未指定品項') {
-      msg += `總共 ${itemCount[item]} 份\n`;
+    if (srcType === 'group') {
+      const profile = await client.getGroupMemberProfile(groupId, uid);
+      senderName = profile.displayName;
     } else {
-      msg += `${item} x${itemCount[item]}\n`;
+      const profile = await client.getProfile(uid);
+      senderName = profile.displayName;
     }
-  }
-
-  msg += `\n總數：${totalQty}份`;
-
-  if (totalMoney > 0) {
-    msg += `\n總金額：${totalMoney}元`;
-  }
-
-  msg += '\n\n麻煩您，謝謝～';
-
-  return msg;
-}
-
-async function markPaidByName(name) {
-  try {
-    const orders = await getAllOrdersToday();
-    let count = 0;
-
-    for (const o of orders) {
-      if (o.name.trim() === name.trim() && o.status === '未付款') {
-        o.row['狀態'] = '已付款';
-        o.row['付款時間'] = nowTW();
-        o.row['付款方式'] = '現金';
-        await o.row.save();
-        count++;
-      }
-    }
-
-    return count;
   } catch (e) {
-    console.error('markPaidByName fail:', e.message);
-    return 0;
+    console.error('getProfile fail:', e.message);
   }
-}
 
-async function cancelPaidByName(name) {
-  try {
-    const orders = await getAllOrdersToday();
-    let count = 0;
+  // ════════════════════════════════════════════════════════════
+  //  管理員指令
+  // ════════════════════════════════════════════════════════════
 
-    for (const o of orders) {
-      if (o.name.trim() === name.trim() && o.status === '已付款') {
-        o.row['狀態'] = '未付款';
-        o.row['付款時間'] = '';
-        o.row['付款方式'] = '';
-        await o.row.save();
-        count++;
-      }
+  // /開單 19:30
+  if (/^\/(開單|開)/.test(text) && isAdmin(uid)) {
+    const timeStr = text.replace(/^\/(開單|開)\s*/, '').trim();
+    const t = timeStr ? parseCloseTime(timeStr) : null;
+
+    isOpen = true;
+    todayOrders = [];
+
+    let replyMsg = '📢 已開放訂購';
+
+    if (t) {
+      const ms = msUntil(t.hour, t.minute);
+      const closeTimeStr = String(t.hour).padStart(2, '0') + ':' + String(t.minute).padStart(2, '0');
+      replyMsg += '\n🕐 將於 ' + closeTimeStr + ' 自動收單';
+
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      autoCloseTimer = setTimeout(() => {
+        doClose(groupId);
+      }, ms);
     }
 
-    return count;
-  } catch (e) {
-    console.error('cancelPaidByName fail:', e.message);
-    return 0;
-  }
-}
+    if (menuText) replyMsg += '\n\n' + menuText;
 
-function splitNames(text) {
-  return String(text || '')
-    .split(/[、,\s]+/)
-    .map(v => v.trim())
-    .filter(Boolean);
-}
-
-function getMillisecondsUntil(timeText) {
-  const match = String(timeText || '').match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-
-  const now = new Date();
-  const close = new Date();
-
-  close.setHours(hour);
-  close.setMinutes(minute);
-  close.setSeconds(0);
-  close.setMilliseconds(0);
-
-  if (close <= now) {
-    close.setDate(close.getDate() + 1);
+    await reply(replyMsg);
+    continue;
   }
 
-  return close - now;
-}
-
-function scheduleAutoCloseByTime(timeText) {
-  if (autoCloseTimer) clearTimeout(autoCloseTimer);
-
-  const ms = getMillisecondsUntil(timeText);
-  if (ms === null) return false;
-
-  const closeDate = new Date(Date.now() + ms);
-  autoCloseAt = closeDate.toISOString();
-
-  autoCloseTimer = setTimeout(async () => {
-    isOpen = false;
-    autoCloseAt = null;
-    autoCloseTimer = null;
-
-    const stat = await buildStatReport().catch(() => '📦 已收單\n統計失敗');
-    await pushToGroup(stat);
-  }, ms);
-
-  return true;
-}
-
-function scheduleAutoCloseByMinutes(minutes) {
-  if (autoCloseTimer) clearTimeout(autoCloseTimer);
-
-  const ms = Math.max(1, Number(minutes)) * 60 * 1000;
-  autoCloseAt = new Date(Date.now() + ms).toISOString();
-
-  autoCloseTimer = setTimeout(async () => {
-    isOpen = false;
-    autoCloseAt = null;
-    autoCloseTimer = null;
-
-    const stat = await buildStatReport().catch(() => '📦 已收單\n統計失敗');
-    await pushToGroup(stat);
-  }, ms);
-}
-
-function cancelAutoClose() {
-  if (autoCloseTimer) clearTimeout(autoCloseTimer);
-  autoCloseTimer = null;
-  autoCloseAt = null;
-}
-
-async function pushToGroup(text) {
-  const gid = process.env.LINE_GROUP_ID || '';
-  if (!gid) {
-    console.error('LINE_GROUP_ID 未設定，無法主動推送收單訊息');
-    return;
+  // /收單
+  if (/^\/(收單|結單|關)/.test(text) && isAdmin(uid)) {
+    await doClose(groupId);
+    await reply(buildOrderList());
+    continue;
   }
 
-  try {
-    await client.pushMessage(gid, {
-      type: 'text',
-      text
-    });
-  } catch (e) {
-    console.error('pushToGroup fail:', e.message);
+  // /查單
+  if (/^\/(查單|查|訂單)/.test(text) && isAdmin(uid)) {
+    await reply(buildOrderList());
+    continue;
   }
-}
 
-app.get('/', (_req, res) => {
-  res.send('LINE 訂單小幫手運作中 ✅');
-});
+  // /店家
+  if (/^\/(店家|店)/.test(text) && isAdmin(uid)) {
+    await reply(buildShopMsg());
+    continue;
+  }
 
-app.get('/api/status', (_req, res) => {
-  res.json({
-    isOpen,
-    autoCloseAt
-  });
-});
+  // /清單（清空今日訂單）
+  if (/^\/(清單|清空|重置)/.test(text) && isAdmin(uid)) {
+    todayOrders = [];
+    await reply('已清空今日訂單');
+    continue;
+  }
 
-app.post('/webhook', async (req, res) => {
-  try {
-    const events = req.body.events || [];
+  // /菜單 （設定或顯示今日菜單文字）
+  if (/^\/(菜單|menu)/.test(text) && isAdmin(uid)) {
+    const content = text.replace(/^\/(菜單|menu)\s*/, '').trim();
+    if (content) {
+      menuText = content;
+      await reply('菜單已設定：\n' + menuText);
+    } else if (menuText) {
+      await reply(menuText);
+    } else {
+      await reply('今日尚未設定菜單');
+    }
+    continue;
+  }
 
-    for (const event of events) {
-      if (event.type !== 'message') continue;
-      if (!event.message || event.message.type !== 'text') continue;
+  // /狀態
+  if (/^\/(狀態|status)/.test(text) && isAdmin(uid)) {
+    const total = todayOrders.reduce((s, o) => s + o.qty, 0);
+    const statusMsg = (isOpen ? '🟢 開單中' : '🔴 已收單') +
+      '\n目前訂單：' + todayOrders.length + ' 筆，共 ' + total + ' 份';
+    await reply(statusMsg);
+    continue;
+  }
 
-      const uid = event.source.userId;
-      const text = event.message.text.trim();
-
-      console.log('[Webhook]', {
-        type: event.source.type,
-        uid,
-        text
-      });
-
-      const reply = async (msg) => {
-        return client.replyMessage(event.replyToken, {
-          type: 'text',
-          text: msg
-        });
-      };
-
-      const profileName = await getProfileName(event, uid);
-
-      saveUserToSheet(
-        profileName,
-        uid,
-        event.source.type,
-        event.source.groupId || event.source.roomId || ''
-      ).catch(() => {});
-
-      if (text === '測試') {
-        await reply('收到訊息了 ✅\nLINE webhook 正常運作中');
-        continue;
-      }
-
-      if (text === '狀態') {
-        let msg = isOpen ? '🟢 目前開單中' : '🔴 目前未開單';
-
-        if (autoCloseAt) {
-          msg += '\n⏰ 自動收單時間：' +
-            new Date(autoCloseAt).toLocaleTimeString('zh-TW', {
-              timeZone: 'Asia/Taipei',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
-        }
-
-        await reply(msg);
-        continue;
-      }
-
-      const paidFront = text.match(/^已付款\s+(.+)$/);
-      if (paidFront && isAdmin(uid)) {
-        const names = splitNames(paidFront[1]);
-        const done = [];
-
-        for (const name of names) {
-          const count = await markPaidByName(name);
-          if (count > 0) done.push(`${name}(${count})`);
-        }
-
-        await reply(done.length ? `已標記付款：${done.join('、')} ✅` : '找不到未付款訂單');
-        continue;
-      }
-
-      const paidBack = text.match(/^(.+?)\s*已付款$/);
-      if (paidBack && isAdmin(uid)) {
-        const targetName = paidBack[1].trim();
-        const count = await markPaidByName(targetName);
-
-        if (count > 0) {
-          await reply(`${targetName} 已標記付款（${count} 筆）✅`);
-        } else {
-          await reply(`找不到 ${targetName} 的未付款訂單`);
-        }
-
-        continue;
-      }
-
-      const cancelPaidFront = text.match(/^取消付款\s+(.+)$/);
-      if (cancelPaidFront && isAdmin(uid)) {
-        const names = splitNames(cancelPaidFront[1]);
-        const done = [];
-
-        for (const name of names) {
-          const count = await cancelPaidByName(name);
-          if (count > 0) done.push(`${name}(${count})`);
-        }
-
-        await reply(done.length ? `已取消付款：${done.join('、')}` : '找不到已付款訂單');
-        continue;
-      }
-
-      const cancelPaidBack = text.match(/^(.+?)\s*取消付款$/);
-      if (cancelPaidBack && isAdmin(uid)) {
-        const targetName = cancelPaidBack[1].trim();
-        const count = await cancelPaidByName(targetName);
-
-        if (count > 0) {
-          await reply(`${targetName} 已改回未付款（${count} 筆）`);
-        } else {
-          await reply(`找不到 ${targetName} 的已付款訂單`);
-        }
-
-        continue;
-      }
-
-      const slashOpen = text.match(/^\/開單\s+(\d{1,2}:\d{2})$/);
-
-      if (slashOpen) {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以開單');
-          continue;
-        }
-
-        const closeTime = slashOpen[1];
-        const ok = scheduleAutoCloseByTime(closeTime);
-
-        if (!ok) {
-          await reply('時間格式錯誤，請輸入：/開單 19:30');
-          continue;
-        }
-
-        isOpen = true;
-
-        await reply(
-          '📢 已開放訂購\n' +
-          `🕢 將於 ${closeTime} 自動收單\n\n` +
-          '大家可以直接輸入：\n' +
-          '慧玲+1\n' +
-          '阿明+2辣\n' +
-          '麗麗*1不辣'
-        );
-
-        continue;
-      }
-
-      const minuteOpen = text.match(/^開單\s+(\d+)$/);
-
-      if (minuteOpen) {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以開單');
-          continue;
-        }
-
-        isOpen = true;
-        scheduleAutoCloseByMinutes(Number(minuteOpen[1]));
-
-        await reply(
-          '📢 已開放訂購\n' +
-          `⏰ 將於 ${minuteOpen[1]} 分鐘後自動收單\n\n` +
-          '大家可以直接輸入：\n' +
-          '慧玲+1\n' +
-          '阿明+2辣\n' +
-          '麗麗*1不辣'
-        );
-
-        continue;
-      }
-
-      if (text === '開單') {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以開單');
-          continue;
-        }
-
-        if (isOpen) {
-          await reply('目前已開單中');
-          continue;
-        }
-
-        isOpen = true;
-        cancelAutoClose();
-
-        await reply(
-          '📢 已開放訂購\n\n' +
-          '大家可以直接輸入：\n' +
-          '慧玲+1\n' +
-          '阿明+2辣\n' +
-          '麗麗*1不辣'
-        );
-
-        continue;
-      }
-
-      if (text === '收單' || text === '結單' || text === '統計') {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以收單/結單/統計');
-          continue;
-        }
-
-        isOpen = false;
-        cancelAutoClose();
-
-        const stat = await buildStatReport();
-        await reply(stat);
-        continue;
-      }
-
-      if (text === '查單' || text === '/查單' || text === '查看訂單' || text === '訂單') {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以查看訂單');
-          continue;
-        }
-
-        await reply(await buildDetailedReport());
-        continue;
-      }
-
-      if (text === '店家' || text === '/店家' || text === '店家單') {
-        if (!isAdmin(uid)) {
-          await reply('只有管理員可以查看店家單');
-          continue;
-        }
-
-        await reply(await buildShopOrder());
-        continue;
-      }
-
-      if (isOpen) {
-        if (text.includes('$')) {
-          const parsedList = parseLegacyOrders(text);
-
-          if (parsedList.length) {
-            let ok = 0;
-
-            for (const p of parsedList) {
-              const result = await saveSimpleOrderToSheet(
-                {
-                  name: p.name,
-                  item: p.item,
-                  store: '手動輸入',
-                  price: p.price,
-                  qty: p.qty,
-                  note: p.note
-                },
-                'legacy_' + p.name
-              );
-
-              if (result.success) ok++;
-            }
-
-            await reply(`✅ 已匯入 ${ok} 筆訂單`);
-            continue;
-          }
-        }
-
-        const simple = parseSimpleOrder(text);
-
-        if (simple) {
-          await saveSimpleOrderToSheet(
-            {
-              name: simple.name,
-              qty: simple.qty,
-              note: simple.note,
-              item: '未指定品項',
-              store: '手動收單',
-              price: 0
-            },
-            uid
-          );
-
-          continue;
-        }
-
-        continue;
-      }
-
-      const maybeOrder = parseSimpleOrder(text);
-      if (maybeOrder) {
-        continue;
-      }
-
+  // ════════════════════════════════════════════════════════════
+  //  一般訂單：姓名+數量[備註]
+  // ════════════════════════════════════════════════════════════
+  const order = parseOrder(text);
+  if (order) {
+    if (!isOpen) {
+      // 收單後不記錄，靜默不回（避免洗版）
       continue;
     }
 
-    return res.sendStatus(200);
-  } catch (err) {
-    console.error('Webhook error:', err);
-    return res.sendStatus(200);
+    // 同名覆蓋（同一輪開單期間，同名視為修改）
+    const existIdx = todayOrders.findIndex(o => o.name === order.name);
+    if (existIdx >= 0) {
+      todayOrders[existIdx] = { ...order, time: nowTW() };
+    } else {
+      todayOrders.push({ ...order, time: nowTW() });
+    }
+
+    // 寫入 Sheets（非同步，不阻塞回覆）
+    writeOrder(order.name, order.qty, order.note).catch(() => {});
+
+    // 回覆確認
+    let confirmMsg = '✅ ' + order.name + ' +' + order.qty;
+    if (order.note) confirmMsg += ' ' + order.note;
+    await reply(confirmMsg);
+    continue;
   }
+
+  // ════════════════════════════════════════════════════════════
+  //  其他訊息：不回覆（避免打擾群組）
+  // ════════════════════════════════════════════════════════════
+}
+```
+
+} catch (err) {
+console.error(‘webhook error:’, err);
+}
 });
 
-app.use((err, _req, res, _next) => {
-  console.error('Global error:', err);
-  res.sendStatus(200);
+// ════════════════════════════════════════════════════════════════
+//  健康檢查
+// ════════════════════════════════════════════════════════════════
+app.get(’/’, (_req, res) => {
+const total = todayOrders.reduce((s, o) => s + o.qty, 0);
+res.send(‘LINE 訂餐機器人運作中｜’ + (isOpen ? ‘開單中’ : ‘已收單’) + ‘｜今日 ’ + total + ’ 份’);
 });
 
+// ════════════════════════════════════════════════════════════════
+//  啟動
+// ════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-  console.log('Server running on port', PORT);
+console.log(‘Server running on port’, PORT);
 });
