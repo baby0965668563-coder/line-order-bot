@@ -24,6 +24,7 @@ let autoCloseAt = null;
 let sheetReady = false;
 let currentGroupId = process.env.LINE_GROUP_ID || '';
 let menuText = '';
+let menuMap = {};
 
 const hardAdmins = [
   'U8d9c82446aa9eb90d7de001cfc7ea90f',
@@ -109,18 +110,66 @@ async function saveUserToSheet(name, userId, sourceType, groupId) {
   }
 }
 
+function parseQty(rawQty) {
+  const q = String(rawQty || '').trim();
+
+  if (q === '半' || q === '0.5' || q === '.5') return 0.5;
+  return Number(q);
+}
+
+function formatQty(qty) {
+  return qty === 0.5 ? '半' : String(qty);
+}
+
+function parseMenuText(text) {
+  const lines = String(text || '')
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  const map = {};
+
+  for (const line of lines) {
+    const match = line.match(/^(\d{1,2})[\s、.．。:：-]+(.+)$/);
+
+    if (match) {
+      const no = Number(match[1]);
+      const item = match[2].trim();
+      map[no] = item;
+    }
+  }
+
+  return map;
+}
+
+function parseNumberOrder(text) {
+  const match = String(text || '')
+    .trim()
+    .match(/^(\d{1,2})\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
+
+  if (!match) return null;
+
+  const no = Number(match[1]);
+  const qty = parseQty(match[2]);
+  const note = String(match[3] || '').trim();
+
+  if (!no || !qty || qty <= 0 || qty > 20) return null;
+
+  return { no, qty, note };
+}
+
 function parseSimpleOrder(text) {
   const t = String(text || '').trim();
 
-  const match = t.match(/^(.+?)\s*[＋+＊*]\s*(\d{1,2})\s*(.*)$/);
+  const match = t.match(/^(.+?)\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
 
   if (!match) return null;
 
   const name = match[1].trim();
-  const qty = Number(match[2]);
+  const qty = parseQty(match[2]);
   const note = String(match[3] || '').trim();
 
-  if (!name || qty < 1 || qty > 20) return null;
+  if (!name || !qty || qty <= 0 || qty > 20) return null;
 
   return { name, qty, note };
 }
@@ -146,12 +195,14 @@ function parseBulkOrders(text) {
       continue;
     }
 
-    const orderMatch = line.match(/^(.+?)\s*[＋+＊*]\s*(\d{1,2})\s*(.*)$/);
+    const orderMatch = line.match(/^(.+?)\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
 
     if (orderMatch && currentItem) {
+      const qty = parseQty(orderMatch[2]);
+
       results.push({
         name: orderMatch[1].trim(),
-        qty: Number(orderMatch[2]),
+        qty,
         note: String(orderMatch[3] || '').trim(),
         item: currentItem,
         price: currentPrice,
@@ -273,7 +324,7 @@ async function buildDetailedReport() {
     totalQty += o.qty;
     totalMoney += o.total;
 
-    msg += `${o.name}+${o.qty}`;
+    msg += `${o.name}+${formatQty(o.qty)}`;
     if (o.note) msg += ` ${o.note}`;
     if (o.item && o.item !== '未指定品項') msg += `｜${o.item}`;
     if (o.total > 0) msg += `｜$${o.total}`;
@@ -326,9 +377,9 @@ async function buildStatReport() {
   msg += '【品項數量】\n';
 
   for (const item in itemCount) {
-    msg += `${item} ×${itemCount[item]}\n`;
-    if (spicyCount[item]) msg += `　辣 ×${spicyCount[item]}\n`;
-    if (notSpicyCount[item]) msg += `　不辣 ×${notSpicyCount[item]}\n`;
+    msg += `${item} ×${formatQty(itemCount[item])}\n`;
+    if (spicyCount[item]) msg += `　辣 ×${formatQty(spicyCount[item])}\n`;
+    if (notSpicyCount[item]) msg += `　不辣 ×${formatQty(notSpicyCount[item])}\n`;
   }
 
   msg += `\n總份數：${totalQty} 份`;
@@ -378,16 +429,16 @@ async function buildShopOrder() {
 
   for (const item in itemCount) {
     if (item === '未指定品項') {
-      msg += `總共 ${itemCount[item]} 份\n`;
+      msg += `總共 ${formatQty(itemCount[item])} 份\n`;
     } else {
-      msg += `${item} x${itemCount[item]}\n`;
+      msg += `${item} x${formatQty(itemCount[item])}\n`;
     }
 
-    if (spicyCount[item]) msg += `辣 x${spicyCount[item]}\n`;
-    if (notSpicyCount[item]) msg += `不辣 x${notSpicyCount[item]}\n`;
+    if (spicyCount[item]) msg += `辣 x${formatQty(spicyCount[item])}\n`;
+    if (notSpicyCount[item]) msg += `不辣 x${formatQty(notSpicyCount[item])}\n`;
   }
 
-  msg += `\n總數：${totalQty}份`;
+  msg += `\n總數：${formatQty(totalQty)}份`;
 
   if (totalMoney > 0) msg += `\n總金額：${totalMoney}元`;
 
@@ -514,7 +565,8 @@ app.get('/api/status', (_req, res) => {
     isOpen,
     autoCloseAt,
     currentGroupId,
-    menuText
+    menuText,
+    menuMap
   });
 });
 
@@ -575,7 +627,7 @@ app.post('/webhook', async (req, res) => {
 
         const orders = await getAllOrdersToday();
         const total = orders.reduce((sum, o) => sum + o.qty, 0);
-        msg += `\n目前訂單：${orders.length} 筆，共 ${total} 份`;
+        msg += `\n目前訂單：${orders.length} 筆，共 ${formatQty(total)} 份`;
 
         await reply(msg);
         continue;
@@ -588,7 +640,9 @@ app.post('/webhook', async (req, res) => {
 
         if (content) {
           menuText = content;
-          await reply('菜單已設定：\n' + menuText);
+          menuMap = parseMenuText(content);
+
+          await reply('✅ 菜單已設定\n\n' + menuText);
         } else if (menuText) {
           await reply(menuText);
         } else {
@@ -629,7 +683,7 @@ app.post('/webhook', async (req, res) => {
           cancelAutoClose();
         }
 
-        msg += '\n\n可輸入：\n慧玲+1\n阿明+2辣\n麗麗*1不辣';
+        msg += '\n\n可輸入：\n慧玲+1\n阿明+2辣\n麗麗*1不辣\n1+2\n1+半';
 
         if (menuText) msg += '\n\n' + menuText;
 
@@ -711,6 +765,28 @@ app.post('/webhook', async (req, res) => {
           }
 
           await reply(`✅ 已匯入 ${ok} 筆訂單`);
+          continue;
+        }
+
+        const numberOrder = parseNumberOrder(text);
+
+        if (numberOrder) {
+          const itemName = menuMap[numberOrder.no];
+
+          if (!itemName) continue;
+
+          await saveOrderToSheet(
+            {
+              name: profileName,
+              qty: numberOrder.qty,
+              note: numberOrder.note,
+              item: itemName,
+              store: '動態菜單',
+              price: 0
+            },
+            uid
+          );
+
           continue;
         }
 
