@@ -25,6 +25,7 @@ let sheetReady = false;
 let currentGroupId = process.env.LINE_GROUP_ID || '';
 let menuText = '';
 let menuMap = {};
+let todayOrders = [];
 
 const hardAdmins = [
   'U8d9c82446aa9eb90d7de001cfc7ea90f',
@@ -78,7 +79,7 @@ async function getProfileName(event, uid) {
 
     const p = await client.getProfile(uid);
     return p.displayName || '未知使用者';
-  } catch (e) {
+  } catch {
     return '未知使用者';
   }
 }
@@ -120,7 +121,11 @@ function formatQty(qty) {
 }
 
 function parseMenuText(text) {
-  const lines = String(text || '').split('\n').map(v => v.trim()).filter(Boolean);
+  const lines = String(text || '')
+    .split('\n')
+    .map(v => v.trim())
+    .filter(Boolean);
+
   const map = {};
 
   for (const line of lines) {
@@ -169,7 +174,7 @@ function parseBulkOrders(text) {
     .map(v => v.trim())
     .filter(Boolean);
 
-  let currentItem = null;
+  let currentItem = '';
   let currentPrice = 0;
   const results = [];
 
@@ -196,7 +201,9 @@ function parseBulkOrders(text) {
         note: String(orderMatch[3] || '').trim(),
         item: currentItem,
         price: currentPrice,
-        store: '手動輸入'
+        store: '手動輸入',
+        status: '未付款',
+        total: currentPrice * qty
       });
     }
   }
@@ -204,7 +211,23 @@ function parseBulkOrders(text) {
   return results;
 }
 
+function addOrderToMemory(order, sourceUserId) {
+  todayOrders.push({
+    name: order.name || '',
+    userId: sourceUserId || '',
+    store: order.store || '手動收單',
+    item: order.item || '未指定品項',
+    note: order.note || '',
+    qty: Number(order.qty || 1),
+    price: Number(order.price || 0),
+    total: Number(order.price || 0) * Number(order.qty || 1),
+    status: '未付款'
+  });
+}
+
 async function saveOrderToSheet(order, sourceUserId) {
+  addOrderToMemory(order, sourceUserId);
+
   try {
     await authSheet();
 
@@ -240,11 +263,13 @@ async function saveOrderToSheet(order, sourceUserId) {
     return true;
   } catch (e) {
     console.error('saveOrderToSheet fail:', e.message);
-    return false;
+    return true;
   }
 }
 
 async function getAllOrdersToday() {
+  if (todayOrders.length > 0) return todayOrders;
+
   try {
     await authSheet();
 
@@ -406,33 +431,73 @@ async function buildShopOrder() {
 }
 
 async function markPaidByName(name) {
-  const orders = await getAllOrdersToday();
   let count = 0;
 
-  for (const o of orders) {
+  for (const o of todayOrders) {
     if (o.name.trim() === name.trim() && o.status === '未付款') {
-      o.row['狀態'] = '已付款';
-      o.row['付款時間'] = nowTW();
-      o.row['付款方式'] = '現金';
-      await o.row.save();
+      o.status = '已付款';
       count++;
     }
+  }
+
+  try {
+    await authSheet();
+
+    const sheet = doc.sheetsByTitle['Orders'];
+    if (!sheet) return count;
+
+    const rows = await sheet.getRows();
+    const today = todayTW();
+
+    for (const r of rows) {
+      if (
+        String(r['時間'] || '').startsWith(today) &&
+        String(r['LINE名稱'] || '').trim() === name.trim() &&
+        String(r['狀態'] || '') === '未付款'
+      ) {
+        r['狀態'] = '已付款';
+        r['付款時間'] = nowTW();
+        r['付款方式'] = '現金';
+        await r.save();
+      }
+    }
+  } catch (e) {
+    console.error('markPaidByName sheet fail:', e.message);
   }
 
   return count;
 }
 
 async function clearTodayOrders() {
-  const orders = await getAllOrdersToday();
-  let count = 0;
+  todayOrders = [];
 
-  for (const o of orders) {
-    o.row['狀態'] = '已刪除';
-    await o.row.save();
-    count++;
+  try {
+    await authSheet();
+
+    const sheet = doc.sheetsByTitle['Orders'];
+    if (!sheet) return 0;
+
+    const rows = await sheet.getRows();
+    const today = todayTW();
+
+    let count = 0;
+
+    for (const r of rows) {
+      if (
+        String(r['時間'] || '').startsWith(today) &&
+        String(r['狀態'] || '') !== '已刪除'
+      ) {
+        r['狀態'] = '已刪除';
+        await r.save();
+        count++;
+      }
+    }
+
+    return count;
+  } catch (e) {
+    console.error('clearTodayOrders fail:', e.message);
+    return 0;
   }
-
-  return count;
 }
 
 function parseCloseTime(text) {
@@ -511,7 +576,14 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/api/status', (_req, res) => {
-  res.json({ isOpen, autoCloseAt, currentGroupId, menuText, menuMap });
+  res.json({
+    isOpen,
+    autoCloseAt,
+    currentGroupId,
+    menuText,
+    menuMap,
+    todayOrders
+  });
 });
 
 app.post('/webhook', async (req, res) => {
@@ -592,14 +664,16 @@ app.post('/webhook', async (req, res) => {
         continue;
       }
 
-      if (/^\/?(開單|開)/.test(text)) {
+      if (/^\/?(開單|開)$|^\/?(開單|開)\s+/.test(text)) {
         if (!isAdmin(uid)) {
           await reply('只有管理員可以開單');
           continue;
         }
 
         const timeText = text.replace(/^\/?(開單|開)\s*/, '').trim();
+
         isOpen = true;
+        todayOrders = [];
 
         let msg = '🟢 已開單，可以開始加單';
 
