@@ -79,7 +79,6 @@ async function getProfileName(event, uid) {
     const p = await client.getProfile(uid);
     return p.displayName || '未知使用者';
   } catch (e) {
-    console.error('取得名稱失敗:', e.message);
     return '未知使用者';
   }
 }
@@ -112,7 +111,6 @@ async function saveUserToSheet(name, userId, sourceType, groupId) {
 
 function parseQty(rawQty) {
   const q = String(rawQty || '').trim();
-
   if (q === '半' || q === '0.5' || q === '.5') return 0.5;
   return Number(q);
 }
@@ -122,21 +120,12 @@ function formatQty(qty) {
 }
 
 function parseMenuText(text) {
-  const lines = String(text || '')
-    .split('\n')
-    .map(v => v.trim())
-    .filter(Boolean);
-
+  const lines = String(text || '').split('\n').map(v => v.trim()).filter(Boolean);
   const map = {};
 
   for (const line of lines) {
     const match = line.match(/^(\d{1,2})[\s、.．。:：-]+(.+)$/);
-
-    if (match) {
-      const no = Number(match[1]);
-      const item = match[2].trim();
-      map[no] = item;
-    }
+    if (match) map[Number(match[1])] = match[2].trim();
   }
 
   return map;
@@ -159,9 +148,9 @@ function parseNumberOrder(text) {
 }
 
 function parseSimpleOrder(text) {
-  const t = String(text || '').trim();
-
-  const match = t.match(/^(.+?)\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
+  const match = String(text || '')
+    .trim()
+    .match(/^(.+?)\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
 
   if (!match) return null;
 
@@ -187,7 +176,7 @@ function parseBulkOrders(text) {
   for (const line of lines) {
     if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
 
-    const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})/);
+    const itemMatch = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*$/);
 
     if (itemMatch) {
       currentItem = itemMatch[1].trim();
@@ -197,8 +186,9 @@ function parseBulkOrders(text) {
 
     const orderMatch = line.match(/^(.+?)\s*[＋+＊*]\s*(半|0\.5|\.5|\d{1,2})\s*(.*)$/);
 
-    if (orderMatch && currentItem) {
+    if (orderMatch && currentItem && currentPrice > 0) {
       const qty = parseQty(orderMatch[2]);
+      if (!qty || qty <= 0) continue;
 
       results.push({
         name: orderMatch[1].trim(),
@@ -224,20 +214,8 @@ async function saveOrderToSheet(order, sourceUserId) {
       sheet = await doc.addSheet({
         title: 'Orders',
         headerValues: [
-          '時間',
-          'LINE名稱',
-          'userId',
-          '店家',
-          '品項',
-          '規格',
-          '備註',
-          '數量',
-          '單價',
-          '總價',
-          '狀態',
-          '付款時間',
-          '付款方式',
-          '訂單備註'
+          '時間', 'LINE名稱', 'userId', '店家', '品項', '規格', '備註',
+          '數量', '單價', '總價', '狀態', '付款時間', '付款方式', '訂單備註'
         ]
       });
     }
@@ -311,12 +289,9 @@ function isNotSpicy(note) {
 
 async function buildDetailedReport() {
   const orders = await getAllOrdersToday();
-
   if (!orders.length) return '📋 今日尚無訂單';
 
-  let msg = '📋 今日訂單明細\n';
-  msg += '─────────────\n';
-
+  let msg = '📋 今日訂單明細\n─────────────\n';
   let totalQty = 0;
   let totalMoney = 0;
 
@@ -333,8 +308,7 @@ async function buildDetailedReport() {
   }
 
   msg += '─────────────\n';
-  msg += `共 ${totalQty} 份`;
-
+  msg += `共 ${formatQty(totalQty)} 份`;
   if (totalMoney > 0) msg += `\n總金額：$${totalMoney}`;
 
   return msg;
@@ -342,7 +316,6 @@ async function buildDetailedReport() {
 
 async function buildStatReport() {
   const orders = await getAllOrdersToday();
-
   if (!orders.length) return '📦 已收單\n\n📊 今日尚無訂單';
 
   const itemCount = {};
@@ -364,16 +337,12 @@ async function buildStatReport() {
     if (isSpicy(o.note)) spicyCount[item] = (spicyCount[item] || 0) + o.qty;
     if (isNotSpicy(o.note)) notSpicyCount[item] = (notSpicyCount[item] || 0) + o.qty;
 
-    if (o.total > 0) {
-      userTotal[o.name || '未知'] = (userTotal[o.name || '未知'] || 0) + o.total;
-    }
-
+    if (o.total > 0) userTotal[o.name || '未知'] = (userTotal[o.name || '未知'] || 0) + o.total;
     if (o.status === '未付款') unpaid.add(o.name || '未知');
   }
 
   let msg = '📦 已收單\n感謝大家訂購 🙏\n\n';
-  msg += '📊 今日訂餐統計\n';
-  msg += '─────────────\n';
+  msg += '📊 今日訂餐統計\n─────────────\n';
   msg += '【品項數量】\n';
 
   for (const item in itemCount) {
@@ -382,11 +351,8 @@ async function buildStatReport() {
     if (notSpicyCount[item]) msg += `　不辣 ×${formatQty(notSpicyCount[item])}\n`;
   }
 
-  msg += `\n總份數：${totalQty} 份`;
-
-  if (totalMoney > 0) {
-    msg += `\n總金額：$${totalMoney}`;
-  }
+  msg += `\n總份數：${formatQty(totalQty)} 份`;
+  if (totalMoney > 0) msg += `\n總金額：$${totalMoney}`;
 
   if (Object.keys(userTotal).length) {
     msg += '\n\n【個人金額】\n';
@@ -404,7 +370,6 @@ async function buildStatReport() {
 
 async function buildShopOrder() {
   const orders = await getAllOrdersToday();
-
   if (!orders.length) return '今日尚無訂單';
 
   const itemCount = {};
@@ -428,20 +393,13 @@ async function buildShopOrder() {
   let msg = '您好，今天訂購如下：\n\n';
 
   for (const item in itemCount) {
-    if (item === '未指定品項') {
-      msg += `總共 ${formatQty(itemCount[item])} 份\n`;
-    } else {
-      msg += `${item} x${formatQty(itemCount[item])}\n`;
-    }
-
+    msg += `${item} x${formatQty(itemCount[item])}\n`;
     if (spicyCount[item]) msg += `辣 x${formatQty(spicyCount[item])}\n`;
     if (notSpicyCount[item]) msg += `不辣 x${formatQty(notSpicyCount[item])}\n`;
   }
 
   msg += `\n總數：${formatQty(totalQty)}份`;
-
   if (totalMoney > 0) msg += `\n總金額：${totalMoney}元`;
-
   msg += '\n\n麻煩您，謝謝～';
 
   return msg;
@@ -494,7 +452,6 @@ function msUntil(hour, minute) {
   const target = new Date();
 
   target.setHours(hour, minute, 0, 0);
-
   if (target <= now) target.setDate(target.getDate() + 1);
 
   return target - now;
@@ -540,17 +497,10 @@ function scheduleAutoCloseByMinutes(minutes) {
 
 async function pushToGroup(text) {
   const gid = currentGroupId || process.env.LINE_GROUP_ID || '';
-
-  if (!gid) {
-    console.error('沒有 LINE_GROUP_ID，無法自動推送收單訊息');
-    return;
-  }
+  if (!gid) return;
 
   try {
-    await client.pushMessage(gid, {
-      type: 'text',
-      text
-    });
+    await client.pushMessage(gid, { type: 'text', text });
   } catch (e) {
     console.error('pushToGroup fail:', e.message);
   }
@@ -561,13 +511,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/api/status', (_req, res) => {
-  res.json({
-    isOpen,
-    autoCloseAt,
-    currentGroupId,
-    menuText,
-    menuMap
-  });
+  res.json({ isOpen, autoCloseAt, currentGroupId, menuText, menuMap });
 });
 
 app.post('/webhook', async (req, res) => {
@@ -588,10 +532,7 @@ app.post('/webhook', async (req, res) => {
 
       const reply = async (msg) => {
         try {
-          await client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: msg
-          });
+          await client.replyMessage(event.replyToken, { type: 'text', text: msg });
         } catch (e) {
           console.error('reply fail:', e.message);
         }
@@ -641,7 +582,6 @@ app.post('/webhook', async (req, res) => {
         if (content) {
           menuText = content;
           menuMap = parseMenuText(content);
-
           await reply('✅ 菜單已設定\n\n' + menuText);
         } else if (menuText) {
           await reply(menuText);
@@ -659,17 +599,15 @@ app.post('/webhook', async (req, res) => {
         }
 
         const timeText = text.replace(/^\/?(開單|開)\s*/, '').trim();
-
         isOpen = true;
 
-        let msg = '📢 已開放訂購';
+        let msg = '🟢 已開單，可以開始加單';
 
         if (timeText) {
           const t = parseCloseTime(timeText);
 
           if (t) {
             scheduleAutoClose(t.hour, t.minute);
-
             const closeTime = String(t.hour).padStart(2, '0') + ':' + String(t.minute).padStart(2, '0');
             msg += `\n🕐 將於 ${closeTime} 自動收單`;
           } else if (/^\d+$/.test(timeText)) {
@@ -682,8 +620,6 @@ app.post('/webhook', async (req, res) => {
         } else {
           cancelAutoClose();
         }
-
-        msg += '\n\n可輸入：\n慧玲+1\n阿明+2辣\n麗麗*1不辣\n1+2\n1+半';
 
         if (menuText) msg += '\n\n' + menuText;
 
@@ -744,11 +680,10 @@ app.post('/webhook', async (req, res) => {
         const targetName = paidMatch[1].trim();
         const count = await markPaidByName(targetName);
 
-        if (count > 0) {
-          await reply(`${targetName} 已標記付款（${count} 筆）✅`);
-        } else {
-          await reply(`找不到 ${targetName} 的未付款訂單`);
-        }
+        await reply(count > 0
+          ? `${targetName} 已標記付款（${count} 筆）✅`
+          : `找不到 ${targetName} 的未付款訂單`
+        );
 
         continue;
       }
@@ -772,7 +707,6 @@ app.post('/webhook', async (req, res) => {
 
         if (numberOrder) {
           const itemName = menuMap[numberOrder.no];
-
           if (!itemName) continue;
 
           await saveOrderToSheet(
