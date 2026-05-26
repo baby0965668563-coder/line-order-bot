@@ -555,11 +555,12 @@ app.post('/webhook', async (req, res) => {
 
         if (autoCloseAt) {
           msg += '\n⏰ 自動收單時間：' +
-            new Date(autoCloseAt).toLocaleTimeString('zh-TW', {
-              timeZone: 'Asia/Taipei',
-              hour: '2-digit',
-              minute: '2-digit'
-            });
+            new Date(autoCloseAt).toLocaleString('zh-TW', {
+  timeZone: 'Asia/Taipei',
+  hour12: false,
+  hour: '2-digit',
+  minute: '2-digit'
+});
         }
 
         const result = parseOrders(allText);
