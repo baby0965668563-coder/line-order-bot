@@ -49,10 +49,6 @@ function nowTW() {
   return new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 }
 
-function todayTW() {
-  return new Date().toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
-}
-
 async function authSheet() {
   if (sheetReady) return;
 
@@ -234,7 +230,7 @@ function parseOrders(text) {
       const extra = String(orderMatch[3] || '').trim();
       const note = extra || '';
       const price = getPrice(rawQty);
-      const qty = rawQty === '半' || rawQty === '0.5' || rawQty === '.5' ? 0.5 : Number(rawQty);
+      const qty = parseQty(rawQty);
 
       add(currentItem, price, name, qty, note);
       continue;
@@ -447,7 +443,7 @@ function scheduleAutoClose(hour, minute) {
     autoCloseTimer = null;
 
     const result = parseOrders(allText);
-    await saveParsedOrdersToSheet(result.details);
+    saveParsedOrdersToSheet(result.details).catch(() => {});
     await pushToGroup(formatResult(result.itemCount, result.userTotal));
   }, ms);
 }
@@ -601,6 +597,31 @@ app.post('/webhook', async (req, res) => {
         if (menuText) msg += '\n\n' + menuText;
 
         await reply(msg);
+        continue;
+      }
+
+      const autoCloseMatch = text.match(/^\/?(收單|結單)\s*\/?\s*(\d{1,2})[:：]?(\d{2})$/);
+
+      if (autoCloseMatch) {
+        if (!isAdmin(uid)) {
+          await reply('只有管理員可以設定自動收單');
+          continue;
+        }
+
+        const hour = Number(autoCloseMatch[2]);
+        const minute = Number(autoCloseMatch[3]);
+
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+          await reply('時間格式錯誤');
+          continue;
+        }
+
+        scheduleAutoClose(hour, minute);
+
+        const hh = String(hour).padStart(2, '0');
+        const mm = String(minute).padStart(2, '0');
+
+        await reply(`⏰ 已設定 ${hh}:${mm} 自動收單`);
         continue;
       }
 
