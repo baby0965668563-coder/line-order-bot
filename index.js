@@ -394,7 +394,7 @@ function getNextCloseDate(hour, minute) {
   const now = new Date();
   const target = new Date();
 
-  target.setHours(hour, minute, 0, 0);
+  target.setHours(hour - 8, minute, 0, 0);
 
   // 允許 90 秒內的時間仍然當成「現在這次」處理
   if (target.getTime() < now.getTime() - 90 * 1000) {
