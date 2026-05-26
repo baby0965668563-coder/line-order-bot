@@ -20,10 +20,11 @@ const doc = new GoogleSpreadsheet(process.env.SHEET_ID);
 
 let isOpen = false;
 let allText = '';
-let autoCloseTimer = null;
 let autoCloseAt = null;
-let currentGroupId = process.env.LINE_GROUP_ID || '';
+let autoCloseGroupId = '';
+let autoClosed = false;
 let sheetReady = false;
+let currentGroupId = process.env.LINE_GROUP_ID || '';
 let menuText = '';
 let menuMap = {};
 
@@ -103,30 +104,6 @@ async function saveUserToSheet(name, userId, sourceType, groupId) {
     });
   } catch (e) {
     console.error('saveUserToSheet fail:', e.message);
-  }
-}
-
-async function saveRawTextToSheet(profileName, userId, text) {
-  try {
-    await authSheet();
-
-    let sheet = doc.sheetsByTitle['RawMessages'];
-
-    if (!sheet) {
-      sheet = await doc.addSheet({
-        title: 'RawMessages',
-        headerValues: ['時間', 'LINE名稱', 'userId', '內容']
-      });
-    }
-
-    await sheet.addRow({
-      時間: nowTW(),
-      LINE名稱: profileName || '',
-      userId: userId || '',
-      內容: text || ''
-    });
-  } catch (e) {
-    console.error('saveRawTextToSheet fail:', e.message);
   }
 }
 
@@ -227,8 +204,7 @@ function parseOrders(text) {
     if (orderMatch && currentItem) {
       const name = orderMatch[1];
       const rawQty = orderMatch[2];
-      const extra = String(orderMatch[3] || '').trim();
-      const note = extra || '';
+      const note = String(orderMatch[3] || '').trim();
       const price = getPrice(rawQty);
       const qty = parseQty(rawQty);
 
@@ -414,42 +390,64 @@ function parseCloseTime(text) {
   return { hour, minute };
 }
 
-function msUntil(hour, minute) {
+function getNextCloseDate(hour, minute) {
   const now = new Date();
   const target = new Date();
 
   target.setHours(hour, minute, 0, 0);
 
-  if (target <= now) target.setDate(target.getDate() + 1);
+  // 允許 90 秒內的時間仍然當成「現在這次」處理
+  if (target.getTime() < now.getTime() - 90 * 1000) {
+    target.setDate(target.getDate() + 1);
+  }
 
-  return target - now;
+  return target;
+}
+
+function setAutoClose(hour, minute) {
+  const target = getNextCloseDate(hour, minute);
+
+  autoCloseAt = target.toISOString();
+  autoCloseGroupId = currentGroupId || process.env.LINE_GROUP_ID || '';
+  autoClosed = false;
+
+  console.log('auto close set:', {
+    autoCloseAt,
+    autoCloseGroupId
+  });
 }
 
 function cancelAutoClose() {
-  if (autoCloseTimer) clearTimeout(autoCloseTimer);
-  autoCloseTimer = null;
   autoCloseAt = null;
+  autoCloseGroupId = '';
+  autoClosed = false;
 }
 
-function scheduleAutoClose(hour, minute) {
-  cancelAutoClose();
+async function executeCloseByTimer() {
+  if (!isOpen) return;
+  if (!autoCloseAt) return;
+  if (autoClosed) return;
 
-  const ms = msUntil(hour, minute);
-  autoCloseAt = new Date(Date.now() + ms).toISOString();
+  const now = Date.now();
+  const target = new Date(autoCloseAt).getTime();
 
-  autoCloseTimer = setTimeout(async () => {
-    isOpen = false;
-    autoCloseAt = null;
-    autoCloseTimer = null;
+  if (now < target) return;
 
-    const result = parseOrders(allText);
-    saveParsedOrdersToSheet(result.details).catch(() => {});
-    await pushToGroup(formatResult(result.itemCount, result.userTotal));
-  }, ms);
+  autoClosed = true;
+  isOpen = false;
+
+  const result = parseOrders(allText);
+  saveParsedOrdersToSheet(result.details).catch(() => {});
+
+  const msg = formatResult(result.itemCount, result.userTotal);
+  await pushToGroup(msg);
+
+  autoCloseAt = null;
+  autoCloseGroupId = '';
 }
 
 async function pushToGroup(text) {
-  const gid = currentGroupId || process.env.LINE_GROUP_ID || '';
+  const gid = autoCloseGroupId || currentGroupId || process.env.LINE_GROUP_ID || '';
 
   if (!gid) {
     console.error('沒有 LINE_GROUP_ID，無法自動推送收單訊息');
@@ -466,6 +464,13 @@ async function pushToGroup(text) {
   }
 }
 
+// 每 10 秒檢查一次，不只靠 setTimeout
+setInterval(() => {
+  executeCloseByTimer().catch(e => {
+    console.error('auto close interval fail:', e.message);
+  });
+}, 10 * 1000);
+
 app.get('/', (_req, res) => {
   res.send('LINE 訂餐統計機器人運作中 ✅');
 });
@@ -474,6 +479,8 @@ app.get('/api/status', (_req, res) => {
   res.json({
     isOpen,
     autoCloseAt,
+    autoCloseGroupId,
+    autoClosed,
     currentGroupId,
     menuText,
     allTextLength: allText.length
@@ -484,6 +491,8 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   try {
+    await executeCloseByTimer();
+
     const events = req.body.events || [];
 
     for (const event of events) {
@@ -576,6 +585,7 @@ app.post('/webhook', async (req, res) => {
 
         isOpen = true;
         allText = '';
+        cancelAutoClose();
 
         let msg = '🟢 已開單，可以開始加單';
 
@@ -583,15 +593,13 @@ app.post('/webhook', async (req, res) => {
           const t = parseCloseTime(timeText);
 
           if (t) {
-            scheduleAutoClose(t.hour, t.minute);
+            setAutoClose(t.hour, t.minute);
             const closeTime = String(t.hour).padStart(2, '0') + ':' + String(t.minute).padStart(2, '0');
             msg += `\n🕐 將於 ${closeTime} 自動收單`;
           } else {
             await reply('時間格式錯誤，請輸入：開單 19:30 或 /開 1930');
             continue;
           }
-        } else {
-          cancelAutoClose();
         }
 
         if (menuText) msg += '\n\n' + menuText;
@@ -616,7 +624,7 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
-        scheduleAutoClose(hour, minute);
+        setAutoClose(hour, minute);
 
         const hh = String(hour).padStart(2, '0');
         const mm = String(minute).padStart(2, '0');
@@ -668,6 +676,7 @@ app.post('/webhook', async (req, res) => {
         }
 
         const result = parseOrders(allText);
+
         isOpen = false;
         cancelAutoClose();
 
@@ -678,7 +687,6 @@ app.post('/webhook', async (req, res) => {
 
       if (isOpen) {
         allText += '\n' + text;
-        saveRawTextToSheet(profileName, uid, text).catch(() => {});
         continue;
       }
 
