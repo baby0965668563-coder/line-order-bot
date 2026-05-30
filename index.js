@@ -155,7 +155,10 @@ function isTrashLine(line) {
 }
 
 function parseOrders(text) {
-  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const lines = String(text || '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean);
 
   let currentItem = '';
   let currentPrice = 0;
@@ -245,12 +248,15 @@ function parseOrders(text) {
       }
     }
 
-const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$/);
+    // 特殊格式：原味+2慧玲、秀美
+    // 代表：原味為品項，慧玲 2 份，秀美 1 份
+    const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$/);
     if (inlineGroup && (currentPrice > 0 || lastPrice > 0)) {
       const item = inlineGroup[1].trim();
       const qtyRaw = inlineGroup[2];
       const namesText = inlineGroup[3].trim();
       const names = splitNames(namesText);
+      const qty = parseQty(qtyRaw);
       const price = getPrice(qtyRaw);
 
       if (names.length) {
@@ -258,9 +264,9 @@ const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$
         currentPrice = price || lastPrice || currentPrice;
         lastPrice = currentPrice || lastPrice;
 
-        for (const n of names) {
-          add(currentItem, currentPrice, n, 1, '');
-        }
+        names.forEach((n, index) => {
+          add(currentItem, currentPrice, n, index === 0 ? qty : 1, '');
+        });
 
         continue;
       }
