@@ -245,7 +245,7 @@ function parseOrders(text) {
       }
     }
 
-    const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s+(.+)$/);
+const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$/);
     if (inlineGroup && (currentPrice > 0 || lastPrice > 0)) {
       const item = inlineGroup[1].trim();
       const qtyRaw = inlineGroup[2];
