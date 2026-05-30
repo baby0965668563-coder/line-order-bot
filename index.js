@@ -50,6 +50,10 @@ function nowTW() {
   return new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
 }
 
+function getTaipeiNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+}
+
 async function authSheet() {
   if (sheetReady) return;
 
@@ -139,13 +143,24 @@ function parseMenuText(text) {
   return map;
 }
 
+function splitNames(text) {
+  return String(text || '')
+    .split(/[、,，\s]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function isTrashLine(line) {
+  return /今天有人要訂|收錢|謝謝|下午|早上|晚上|星期|明天|湊到|結單|沒加到|不要怪我|截止|滿\d+/.test(line);
+}
+
 function parseOrders(text) {
   const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
 
   let currentItem = '';
   let currentPrice = 0;
-  let pendingOrder = null;
-  let itemBuffer = '';
+  let lastPrice = 0;
+  let pendingInlineItem = '';
   let priceMap = {};
 
   const itemCount = {};
@@ -153,7 +168,10 @@ function parseOrders(text) {
   const details = [];
 
   function cleanItemName(text) {
-    return clean(text).replace(/\d+顆/g, '');
+    return clean(text)
+      .replace(/\d+顆/g, '')
+      .replace(/^[$＄💰]\d+$/, '')
+      .trim();
   }
 
   function add(item, price, name, qty = 1, note = '') {
@@ -182,11 +200,22 @@ function parseOrders(text) {
   function getPrice(rawQty) {
     if (priceMap[rawQty] !== undefined) return priceMap[rawQty];
     if (rawQty === '半' && priceMap['0.5'] !== undefined) return priceMap['0.5'];
-    return currentPrice;
+    return currentPrice || lastPrice || 0;
   }
 
   for (let line of lines) {
-    if (/今天有人要訂|收錢|謝謝|下午|早上|晚上|星期/.test(line)) continue;
+    if (!line) continue;
+
+    if (isTrashLine(line) && !/[💰$＄]\s*\d/.test(line)) {
+      continue;
+    }
+
+    const priceOnly = line.match(/^[💰$＄]\s*(\d{1,5})$/);
+    if (priceOnly) {
+      lastPrice = Number(priceOnly[1]);
+      if (currentItem) currentPrice = lastPrice;
+      continue;
+    }
 
     const priceTable = line.match(/^(半|0\.5|1)\s*[💰$＄]\s*(\d{1,5})$/);
     if (priceTable) {
@@ -194,21 +223,58 @@ function parseOrders(text) {
       continue;
     }
 
-    if (pendingOrder && !/[+＋*＊]/.test(line) && !/\d/.test(line)) {
-      add(pendingOrder.item, pendingOrder.price, line, 1);
-      pendingOrder = null;
+    const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
+    if (itemSymbol) {
+      currentItem = itemSymbol[1].trim();
+      currentPrice = Number(itemSymbol[2]);
+      lastPrice = currentPrice;
+      pendingInlineItem = '';
+      priceMap = {};
       continue;
+    }
+
+    const pureItemAfterPrice = line.match(/^([^\d+＋*＊$＄💰]+)$/);
+    if (pureItemAfterPrice && lastPrice > 0) {
+      const maybeItem = pureItemAfterPrice[1].trim();
+
+      if (!isTrashLine(maybeItem) && maybeItem.length <= 12) {
+        currentItem = maybeItem;
+        currentPrice = lastPrice;
+        pendingInlineItem = '';
+        continue;
+      }
+    }
+
+    const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s+(.+)$/);
+    if (inlineGroup && (currentPrice > 0 || lastPrice > 0)) {
+      const item = inlineGroup[1].trim();
+      const qtyRaw = inlineGroup[2];
+      const namesText = inlineGroup[3].trim();
+      const names = splitNames(namesText);
+      const price = getPrice(qtyRaw);
+
+      if (names.length) {
+        currentItem = item;
+        currentPrice = price || lastPrice || currentPrice;
+        lastPrice = currentPrice || lastPrice;
+
+        for (const n of names) {
+          add(currentItem, currentPrice, n, 1, '');
+        }
+
+        continue;
+      }
     }
 
     const orderMatch = line.match(/^(.+?)[+＋*＊]\s*(半|0\.5|\.5|\d+)(.*)$/);
     if (orderMatch && currentItem) {
-      const name = orderMatch[1];
+      const name = orderMatch[1].trim();
       const rawQty = orderMatch[2];
-      const note = String(orderMatch[3] || '').trim();
+      const extra = String(orderMatch[3] || '').trim();
       const price = getPrice(rawQty);
       const qty = parseQty(rawQty);
 
-      add(currentItem, price, name, qty, note);
+      add(currentItem, price, name, qty, extra);
       continue;
     }
 
@@ -224,69 +290,60 @@ function parseOrders(text) {
     const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
     if (inlineSymbol) {
       add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
-      itemBuffer = '';
-      continue;
-    }
-
-    const itemSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})$/);
-    if (itemSymbol) {
-      currentItem = itemSymbol[1];
-      currentPrice = Number(itemSymbol[2]);
-      itemBuffer = '';
-      priceMap = {};
+      pendingInlineItem = '';
       continue;
     }
 
     const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
     if (inlineNoSymbol && !/[+＋*＊]/.test(line)) {
       add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
-      itemBuffer = '';
+      pendingInlineItem = '';
       continue;
     }
 
     const noSymbolNoName = line.match(/^(.+?)(\d{2,5})$/);
     if (noSymbolNoName && !/[+＋*＊]/.test(line) && !/顆/.test(line)) {
-      pendingOrder = {
-        item: noSymbolNoName[1],
-        price: Number(noSymbolNoName[2])
-      };
-      itemBuffer = '';
+      currentItem = noSymbolNoName[1].trim();
+      currentPrice = Number(noSymbolNoName[2]);
+      lastPrice = currentPrice;
+      pendingInlineItem = '';
       continue;
     }
 
     const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
-    if (priceNameOnly && itemBuffer) {
-      add(itemBuffer, Number(priceNameOnly[1]), priceNameOnly[2], 1);
-      itemBuffer = '';
+    if (priceNameOnly && pendingInlineItem) {
+      add(pendingInlineItem, Number(priceNameOnly[1]), priceNameOnly[2], 1);
+      pendingInlineItem = '';
       continue;
     }
 
-    const priceOnly = line.match(/^(\d{2,5})$/);
-    if (priceOnly && itemBuffer) {
-      pendingOrder = {
-        item: itemBuffer,
-        price: Number(priceOnly[1])
-      };
-      itemBuffer = '';
+    const priceOnlyPlain = line.match(/^(\d{2,5})$/);
+    if (priceOnlyPlain && pendingInlineItem) {
+      currentItem = pendingInlineItem;
+      currentPrice = Number(priceOnlyPlain[1]);
+      lastPrice = currentPrice;
+      pendingInlineItem = '';
       continue;
     }
 
     if (!/[+＋*＊]/.test(line)) {
       if (/顆/.test(line)) {
         currentItem = line;
-        currentPrice = 0;
-        itemBuffer = line;
+        currentPrice = lastPrice || 0;
+        pendingInlineItem = line;
         continue;
       }
 
-      if (currentItem) {
-        add(currentItem, currentPrice, line, 1);
+      if (currentItem && (currentPrice > 0 || lastPrice > 0) && !isTrashLine(line)) {
+        const names = splitNames(line);
+
+        for (const n of names) {
+          add(currentItem, currentPrice || lastPrice, n, 1);
+        }
+
         continue;
       }
 
-      currentItem = line;
-      currentPrice = 0;
-      itemBuffer = line;
       continue;
     }
   }
@@ -391,17 +448,27 @@ function parseCloseTime(text) {
 }
 
 function getNextCloseDate(hour, minute) {
-  const now = new Date();
-  const target = new Date();
+  const now = getTaipeiNow();
+  const target = getTaipeiNow();
 
-  target.setHours(hour - 8, minute, 0, 0);
+  target.setHours(hour, minute, 0, 0);
 
-  // 允許 90 秒內的時間仍然當成「現在這次」處理
   if (target.getTime() < now.getTime() - 90 * 1000) {
     target.setDate(target.getDate() + 1);
   }
 
   return target;
+}
+
+function formatAutoCloseTime() {
+  if (!autoCloseAt) return '';
+
+  return new Date(autoCloseAt).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function setAutoClose(hour, minute) {
@@ -428,7 +495,7 @@ async function executeCloseByTimer() {
   if (!autoCloseAt) return;
   if (autoClosed) return;
 
-  const now = Date.now();
+  const now = getTaipeiNow().getTime();
   const target = new Date(autoCloseAt).getTime();
 
   if (now < target) return;
@@ -464,7 +531,6 @@ async function pushToGroup(text) {
   }
 }
 
-// 每 10 秒檢查一次，不只靠 setTimeout
 setInterval(() => {
   executeCloseByTimer().catch(e => {
     console.error('auto close interval fail:', e.message);
@@ -475,10 +541,13 @@ app.get('/', (_req, res) => {
   res.send('LINE 訂餐統計機器人運作中 ✅');
 });
 
-app.get('/api/status', (_req, res) => {
+app.get('/api/status', async (_req, res) => {
+  await executeCloseByTimer().catch(() => {});
+
   res.json({
     isOpen,
     autoCloseAt,
+    autoCloseTimeTW: formatAutoCloseTime(),
     autoCloseGroupId,
     autoClosed,
     currentGroupId,
@@ -554,13 +623,7 @@ app.post('/webhook', async (req, res) => {
         let msg = isOpen ? '🟢 目前開單中' : '🔴 目前未開單';
 
         if (autoCloseAt) {
-          msg += '\n⏰ 自動收單時間：' +
-            new Date(autoCloseAt).toLocaleString('zh-TW', {
-  timeZone: 'Asia/Taipei',
-  hour12: false,
-  hour: '2-digit',
-  minute: '2-digit'
-});
+          msg += '\n⏰ 自動收單時間：' + formatAutoCloseTime();
         }
 
         const result = parseOrders(allText);
