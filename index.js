@@ -35,11 +35,7 @@ const hardAdmins = [
   'Uc669eca67bf477460945f45751edd3e9'
 ];
 
-const envAdmins = (process.env.ADMIN_IDS || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
-
+const envAdmins = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const admins = Array.from(new Set([...hardAdmins, ...envAdmins]));
 
 function isAdmin(uid) {
@@ -128,11 +124,7 @@ function formatQty(qty) {
 }
 
 function parseMenuText(text) {
-  const lines = String(text || '')
-    .split('\n')
-    .map(v => v.trim())
-    .filter(Boolean);
-
+  const lines = String(text || '').split('\n').map(v => v.trim()).filter(Boolean);
   const map = {};
 
   for (const line of lines) {
@@ -152,6 +144,23 @@ function splitNames(text) {
 
 function isTrashLine(line) {
   return /今天有人要訂|收錢|謝謝|下午|早上|晚上|星期|明天|湊到|結單|沒加到|不要怪我|截止|滿\d+/.test(line);
+}
+
+function extractParenNote(text) {
+  const str = String(text || '').trim();
+  const m = str.match(/^(.*?)[（(]\s*(.*?)\s*[）)]\s*$/);
+
+  if (!m) {
+    return {
+      main: str.trim(),
+      note: ''
+    };
+  }
+
+  return {
+    main: m[1].trim(),
+    note: m[2].trim()
+  };
 }
 
 function parseOrders(text) {
@@ -180,6 +189,7 @@ function parseOrders(text) {
   function add(item, price, name, qty = 1, note = '') {
     item = cleanItemName(item);
     name = clean(name);
+    note = clean(note);
 
     if (!item || !name || !qty) return;
 
@@ -248,8 +258,6 @@ function parseOrders(text) {
       }
     }
 
-    // 特殊格式：原味+2慧玲、秀美
-    // 代表：原味為品項，慧玲 2 份，秀美 1 份
     const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$/);
     if (inlineGroup && (currentPrice > 0 || lastPrice > 0)) {
       const item = inlineGroup[1].trim();
@@ -265,7 +273,8 @@ function parseOrders(text) {
         lastPrice = currentPrice || lastPrice;
 
         names.forEach((n, index) => {
-          add(currentItem, currentPrice, n, index === 0 ? qty : 1, '');
+          const parsed = extractParenNote(n);
+          add(currentItem, currentPrice, parsed.main, index === 0 ? qty : 1, parsed.note);
         });
 
         continue;
@@ -274,13 +283,19 @@ function parseOrders(text) {
 
     const orderMatch = line.match(/^(.+?)[+＋*＊]\s*(半|0\.5|\.5|\d+)(.*)$/);
     if (orderMatch && currentItem) {
-      const name = orderMatch[1].trim();
+      const nameRaw = orderMatch[1].trim();
       const rawQty = orderMatch[2];
-      const extra = String(orderMatch[3] || '').trim();
+      const extraRaw = String(orderMatch[3] || '').trim();
       const price = getPrice(rawQty);
       const qty = parseQty(rawQty);
 
-      add(currentItem, price, name, qty, extra);
+      const parsedName = extractParenNote(nameRaw);
+      const parsedExtra = extractParenNote(extraRaw);
+
+      const finalName = parsedName.main;
+      const finalNote = parsedName.note || parsedExtra.note || clean(extraRaw);
+
+      add(currentItem, price, finalName, qty, finalNote);
       continue;
     }
 
@@ -295,14 +310,16 @@ function parseOrders(text) {
 
     const inlineSymbol = line.match(/^(.+?)\s*[💰$＄]\s*(\d{1,5})\s*([^\d\s]+)$/);
     if (inlineSymbol) {
-      add(inlineSymbol[1], Number(inlineSymbol[2]), inlineSymbol[3], 1);
+      const parsed = extractParenNote(inlineSymbol[3]);
+      add(inlineSymbol[1], Number(inlineSymbol[2]), parsed.main, 1, parsed.note);
       pendingInlineItem = '';
       continue;
     }
 
     const inlineNoSymbol = line.match(/^(.+?)(\d{2,5})([^\d\s]+)$/);
     if (inlineNoSymbol && !/[+＋*＊]/.test(line)) {
-      add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), inlineNoSymbol[3], 1);
+      const parsed = extractParenNote(inlineNoSymbol[3]);
+      add(inlineNoSymbol[1], Number(inlineNoSymbol[2]), parsed.main, 1, parsed.note);
       pendingInlineItem = '';
       continue;
     }
@@ -318,7 +335,8 @@ function parseOrders(text) {
 
     const priceNameOnly = line.match(/^(\d{2,5})\s*([^\d\s]+)$/);
     if (priceNameOnly && pendingInlineItem) {
-      add(pendingInlineItem, Number(priceNameOnly[1]), priceNameOnly[2], 1);
+      const parsed = extractParenNote(priceNameOnly[2]);
+      add(pendingInlineItem, Number(priceNameOnly[1]), parsed.main, 1, parsed.note);
       pendingInlineItem = '';
       continue;
     }
@@ -344,7 +362,8 @@ function parseOrders(text) {
         const names = splitNames(line);
 
         for (const n of names) {
-          add(currentItem, currentPrice || lastPrice, n, 1);
+          const parsed = extractParenNote(n);
+          add(currentItem, currentPrice || lastPrice, parsed.main, 1, parsed.note);
         }
 
         continue;
