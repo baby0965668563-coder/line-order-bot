@@ -150,12 +150,7 @@ function extractParenNote(text) {
   const str = String(text || '').trim();
   const m = str.match(/^(.*?)[（(]\s*(.*?)\s*[）)]\s*$/);
 
-  if (!m) {
-    return {
-      main: str.trim(),
-      note: ''
-    };
-  }
+  if (!m) return { main: str, note: '' };
 
   return {
     main: m[1].trim(),
@@ -164,10 +159,7 @@ function extractParenNote(text) {
 }
 
 function parseOrders(text) {
-  const lines = String(text || '')
-    .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean);
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
 
   let currentItem = '';
   let currentPrice = 0;
@@ -216,7 +208,19 @@ function parseOrders(text) {
     return currentPrice || lastPrice || 0;
   }
 
-  for (let line of lines) {
+  function nextMeaningfulLine(startIndex) {
+    for (let i = startIndex + 1; i < lines.length; i++) {
+      const v = lines[i].trim();
+      if (!v) continue;
+      if (isTrashLine(v) && !/[💰$＄]\s*\d/.test(v)) continue;
+      return v;
+    }
+
+    return '';
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (!line) continue;
 
     if (isTrashLine(line) && !/[💰$＄]\s*\d/.test(line)) {
@@ -246,38 +250,32 @@ function parseOrders(text) {
       continue;
     }
 
-    const pureItemAfterPrice = line.match(/^([^\d+＋*＊$＄💰]+)$/);
-    if (pureItemAfterPrice && lastPrice > 0) {
-      const maybeItem = pureItemAfterPrice[1].trim();
-
-      if (!isTrashLine(maybeItem) && maybeItem.length <= 12) {
-        currentItem = maybeItem;
-        currentPrice = lastPrice;
-        pendingInlineItem = '';
-        continue;
-      }
-    }
-
     const inlineGroup = line.match(/^(.+?)\s*[+＋*＊]\s*(半|0\.5|\.5|\d+)\s*(.+)$/);
     if (inlineGroup && (currentPrice > 0 || lastPrice > 0)) {
       const item = inlineGroup[1].trim();
       const qtyRaw = inlineGroup[2];
       const namesText = inlineGroup[3].trim();
-      const names = splitNames(namesText);
-      const qty = parseQty(qtyRaw);
-      const price = getPrice(qtyRaw);
 
-      if (names.length) {
-        currentItem = item;
-        currentPrice = price || lastPrice || currentPrice;
-        lastPrice = currentPrice || lastPrice;
+      const looksLikeNoteOnly = /^[（(].*[）)]$/.test(namesText);
+      const hasNameSeparator = /[、,，\s]/.test(namesText);
 
-        names.forEach((n, index) => {
-          const parsed = extractParenNote(n);
-          add(currentItem, currentPrice, parsed.main, index === 0 ? qty : 1, parsed.note);
-        });
+      if (!looksLikeNoteOnly && hasNameSeparator) {
+        const names = splitNames(namesText);
+        const qty = parseQty(qtyRaw);
+        const price = getPrice(qtyRaw);
 
-        continue;
+        if (names.length) {
+          currentItem = item;
+          currentPrice = price || lastPrice || currentPrice;
+          lastPrice = currentPrice || lastPrice;
+
+          names.forEach((n, index) => {
+            const parsed = extractParenNote(n);
+            add(currentItem, currentPrice, parsed.main, index === 0 ? qty : 1, parsed.note);
+          });
+
+          continue;
+        }
       }
     }
 
@@ -359,6 +357,15 @@ function parseOrders(text) {
       }
 
       if (currentItem && (currentPrice > 0 || lastPrice > 0) && !isTrashLine(line)) {
+        const next = nextMeaningfulLine(i);
+
+        if (lastPrice > 0 && line.length <= 12 && /[+＋*＊]/.test(next)) {
+          currentItem = line;
+          currentPrice = lastPrice;
+          pendingInlineItem = '';
+          continue;
+        }
+
         const names = splitNames(line);
 
         for (const n of names) {
@@ -502,11 +509,6 @@ function setAutoClose(hour, minute) {
   autoCloseAt = target.toISOString();
   autoCloseGroupId = currentGroupId || process.env.LINE_GROUP_ID || '';
   autoClosed = false;
-
-  console.log('auto close set:', {
-    autoCloseAt,
-    autoCloseGroupId
-  });
 }
 
 function cancelAutoClose() {
@@ -530,9 +532,7 @@ async function executeCloseByTimer() {
 
   const result = parseOrders(allText);
   saveParsedOrdersToSheet(result.details).catch(() => {});
-
-  const msg = formatResult(result.itemCount, result.userTotal);
-  await pushToGroup(msg);
+  await pushToGroup(formatResult(result.itemCount, result.userTotal));
 
   autoCloseAt = null;
   autoCloseGroupId = '';
@@ -540,17 +540,10 @@ async function executeCloseByTimer() {
 
 async function pushToGroup(text) {
   const gid = autoCloseGroupId || currentGroupId || process.env.LINE_GROUP_ID || '';
-
-  if (!gid) {
-    console.error('沒有 LINE_GROUP_ID，無法自動推送收單訊息');
-    return;
-  }
+  if (!gid) return;
 
   try {
-    await client.pushMessage(gid, {
-      type: 'text',
-      text
-    });
+    await client.pushMessage(gid, { type: 'text', text });
   } catch (e) {
     console.error('pushToGroup fail:', e.message);
   }
@@ -601,10 +594,7 @@ app.post('/webhook', async (req, res) => {
 
       const reply = async (msg) => {
         try {
-          await client.replyMessage(event.replyToken, {
-            type: 'text',
-            text: msg
-          });
+          await client.replyMessage(event.replyToken, { type: 'text', text: msg });
         } catch (e) {
           console.error('reply fail:', e.message);
         }
